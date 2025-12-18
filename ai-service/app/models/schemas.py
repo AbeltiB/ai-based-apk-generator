@@ -355,7 +355,7 @@ class BlocklyDefinition(BaseModel):
     type: Literal["event", "action", "getter", "setter", "logic", "math", "text"]
     """Block category"""
     
-    json: Dict[str, Any]
+    block_json: Dict[str, Any]
     """Raw Blockly JSON (block-specific format)"""
     
     connections: List[BlockConnection] = Field(default_factory=list)
@@ -366,7 +366,7 @@ class BlocklyDefinition(BaseModel):
             "example": {
                 "block_id": "event_1",
                 "type": "event",
-                "json": {
+                "block_json": {
                     "type": "component_event",
                     "fields": {
                         "COMPONENT": "btn_add",
@@ -382,3 +382,92 @@ class BlocklyDefinition(BaseModel):
                 ]
             }
         }
+        # ============================================================================
+# PROGRESS AND ERROR RESPONSES
+# ============================================================================
+
+class ProgressUpdate(BaseModel):
+    """
+    Progress update during AI processing.
+    
+    Sent to frontend for real-time progress tracking.
+    """
+    task_id: str
+    """Task ID being processed"""
+    
+    socket_id: str
+    """WebSocket ID"""
+    
+    type: Literal["progress"] = "progress"
+    """Message type"""
+    
+    stage: Literal["analyzing", "designing", "layout", "blocks", "code", "finalizing"]
+    """Current processing stage"""
+    
+    progress: int = Field(..., ge=0, le=100)
+    """Progress percentage (0-100)"""
+    
+    message: str = ""
+    """Progress message"""
+
+
+class ErrorResponse(BaseModel):
+    """
+    Error response when something goes wrong.
+    """
+    task_id: str
+    """Task ID that failed"""
+    
+    socket_id: str
+    """WebSocket ID"""
+    
+    type: Literal["error"] = "error"
+    """Message type"""
+    
+    error: str
+    """Error message"""
+    
+    details: Optional[str] = None
+    """Detailed error information"""
+
+
+# ============================================================================
+# TEST CODE (at the very end)
+# ============================================================================
+
+if __name__ == "__main__":
+    # Test model creation
+    print("\n" + "=" * 60)
+    print("TESTING PYDANTIC MODELS")
+    print("=" * 60)
+    
+    # Test AIRequest
+    request = AIRequest(
+        user_id="test_user",
+        session_id="test_session",
+        socket_id="test_socket",
+        prompt="Create a simple counter app"
+    )
+    print(f"\n✅ AIRequest created: {request.task_id}")
+    
+    # Test ProgressUpdate
+    progress = ProgressUpdate(
+        task_id=request.task_id,
+        socket_id=request.socket_id,
+        stage="designing",
+        progress=25,
+        message="Creating architecture..."
+    )
+    print(f"✅ ProgressUpdate created: {progress.stage} - {progress.progress}%")
+    
+    # Test ErrorResponse
+    error = ErrorResponse(
+        task_id=request.task_id,
+        socket_id=request.socket_id,
+        error="Test error message"
+    )
+    print(f"✅ ErrorResponse created: {error.error}")
+    
+    print("\n" + "=" * 60)
+    print("✅ All models validated successfully!")
+    print("=" * 60 + "\n")
