@@ -37,8 +37,11 @@ class Settings(BaseSettings):
     anthropic_max_tokens: int = 4000
     """Maximum tokens per API call"""
     
-    anthropic_temperature: float = 0.7
-    """Sampling temperature (0.0 - 1.0)"""
+    anthropic_temperature: float = 0.3
+    """Sampling temperature (0.0 - 1.0) - Lower for consistency"""
+    
+    anthropic_timeout: int = 30
+    """API request timeout in seconds"""
     
     # ============================================================================
     # RABBITMQ SETTINGS
@@ -66,6 +69,37 @@ class Settings(BaseSettings):
     redis_cache_ttl: int = 86400
     """Cache TTL in seconds (default: 24 hours)"""
     
+    redis_semantic_cache_ttl: int = 604800
+    """Semantic cache TTL in seconds (default: 7 days)"""
+    
+    redis_cache_similarity_threshold: float = 0.95
+    """Minimum cosine similarity for cache hit (0.0 - 1.0)"""
+    
+    # ============================================================================
+    # POSTGRESQL SETTINGS
+    # ============================================================================
+    
+    postgres_host: str = "localhost"
+    """PostgreSQL host"""
+    
+    postgres_port: int = 5432
+    """PostgreSQL port"""
+    
+    postgres_db: str = "appbuilder"
+    """PostgreSQL database name"""
+    
+    postgres_user: str = "admin"
+    """PostgreSQL username"""
+    
+    postgres_password: str = "password"
+    """PostgreSQL password"""
+    
+    postgres_min_connections: int = 5
+    """Minimum connections in pool"""
+    
+    postgres_max_connections: int = 20
+    """Maximum connections in pool"""
+    
     # ============================================================================
     # PROCESSING SETTINGS
     # ============================================================================
@@ -75,6 +109,49 @@ class Settings(BaseSettings):
     
     retry_delay: int = 2
     """Delay between retries in seconds"""
+    
+    request_timeout: int = 30
+    """Maximum time to process a request (seconds)"""
+    
+    # ============================================================================
+    # RATE LIMITING SETTINGS
+    # ============================================================================
+    
+    rate_limit_requests_per_hour: int = 100
+    """Maximum requests per user per hour"""
+    
+    rate_limit_enabled: bool = True
+    """Enable rate limiting"""
+    
+    # ============================================================================
+    # CANVAS SETTINGS
+    # ============================================================================
+    
+    canvas_width: int = 375
+    """Mobile canvas width (iPhone standard)"""
+    
+    canvas_height: int = 667
+    """Mobile canvas height (iPhone standard)"""
+    
+    canvas_safe_area_top: int = 44
+    """Safe area inset top (status bar)"""
+    
+    canvas_safe_area_bottom: int = 34
+    """Safe area inset bottom (home indicator)"""
+    
+    # ============================================================================
+    # COMPONENT SETTINGS
+    # ============================================================================
+    
+    available_components: list[str] = [
+        "Button", "InputText", "Switch", "Checkbox", "TextArea",
+        "Slider", "Spinner", "Text", "Joystick", "ProgressBar",
+        "DatePicker", "TimePicker", "ColorPicker", "Map", "Chart"
+    ]
+    """List of available UI components"""
+    
+    min_touch_target_size: int = 44
+    """Minimum touch target size in pixels (accessibility)"""
     
     # ============================================================================
     # PYDANTIC CONFIGURATION
@@ -88,13 +165,14 @@ class Settings(BaseSettings):
     )
     
     def __repr__(self) -> str:
-        """Safe string representation (hides API key)"""
+        """Safe string representation (hides sensitive data)"""
         return (
             f"Settings("
             f"app_name='{self.app_name}', "
             f"debug={self.debug}, "
             f"anthropic_model='{self.anthropic_model}', "
-            f"anthropic_api_key='sk-ant-***...'"
+            f"postgres_host='{self.postgres_host}', "
+            f"redis_url='{self.redis_url[:20]}...'"
             f")"
         )
 
@@ -131,15 +209,42 @@ if __name__ == "__main__":
     
     test_settings = get_settings()
     
-    print(f"\nApp Name: {test_settings.app_name}")
-    print(f"Version: {test_settings.app_version}")
-    print(f"Debug Mode: {test_settings.debug}")
-    print(f"Log Level: {test_settings.log_level}")
-    print(f"\nClaude Model: {test_settings.anthropic_model}")
-    print(f"Max Tokens: {test_settings.anthropic_max_tokens}")
-    print(f"\nRabbitMQ URL: {test_settings.rabbitmq_url}")
-    print(f"Redis URL: {test_settings.redis_url}")
-    print(f"\nAPI Key: {'✅ Loaded' if test_settings.anthropic_api_key else '❌ Missing'}")
+    print(f"\n📋 Application")
+    print(f"   Name: {test_settings.app_name}")
+    print(f"   Version: {test_settings.app_version}")
+    print(f"   Debug: {test_settings.debug}")
+    print(f"   Log Level: {test_settings.log_level}")
+    
+    print(f"\n🤖 Claude API")
+    print(f"   Model: {test_settings.anthropic_model}")
+    print(f"   Max Tokens: {test_settings.anthropic_max_tokens}")
+    print(f"   Temperature: {test_settings.anthropic_temperature}")
+    print(f"   Timeout: {test_settings.anthropic_timeout}s")
+    print(f"   API Key: {'✅ Loaded' if test_settings.anthropic_api_key else '❌ Missing'}")
+    
+    print(f"\n🐰 RabbitMQ")
+    print(f"   URL: {test_settings.rabbitmq_url}")
+    print(f"   Request Queue: {test_settings.rabbitmq_queue_ai_requests}")
+    print(f"   Response Queue: {test_settings.rabbitmq_queue_ai_responses}")
+    
+    print(f"\n📦 Redis")
+    print(f"   URL: {test_settings.redis_url}")
+    print(f"   Cache TTL: {test_settings.redis_cache_ttl}s")
+    print(f"   Semantic Cache TTL: {test_settings.redis_semantic_cache_ttl}s")
+    
+    print(f"\n🐘 PostgreSQL")
+    print(f"   Host: {test_settings.postgres_host}:{test_settings.postgres_port}")
+    print(f"   Database: {test_settings.postgres_db}")
+    print(f"   User: {test_settings.postgres_user}")
+    print(f"   Pool: {test_settings.postgres_min_connections}-{test_settings.postgres_max_connections}")
+    
+    print(f"\n📱 Canvas")
+    print(f"   Size: {test_settings.canvas_width}x{test_settings.canvas_height}")
+    print(f"   Safe Area: Top {test_settings.canvas_safe_area_top}, Bottom {test_settings.canvas_safe_area_bottom}")
+    
+    print(f"\n🎨 Components")
+    print(f"   Available: {len(test_settings.available_components)}")
+    print(f"   Min Touch Size: {test_settings.min_touch_target_size}px")
     
     print("\n" + "=" * 60)
     print("✅ Configuration loaded successfully!")

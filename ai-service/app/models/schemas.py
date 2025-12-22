@@ -401,7 +401,7 @@ class ProgressUpdate(BaseModel):
     type: Literal["progress"] = "progress"
     """Message type"""
     
-    stage: Literal["analyzing", "designing", "layout", "blocks", "code", "finalizing"]
+    stage: str = Field(..., description="Current processing stage")
     """Current processing stage"""
     
     progress: int = Field(..., ge=0, le=100)
