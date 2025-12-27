@@ -20,12 +20,8 @@ class IntentType(str, Enum):
 class ComplexityLevel(str, Enum):
     """Complexity levels of requests"""
     SIMPLE = "simple"
-    MODERATE = "moderate"
-    COMPLEX = "complex"
-    VERY_COMPLEX = "very_complex"
-    
-
-
+    MEDIUM = "medium"
+    COMPLEX = "complex"  
 
 class SafetyStatus(str, Enum):
     """Safety classification for requests"""
