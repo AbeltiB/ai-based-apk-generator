@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional
 from loguru import logger
 
 from app.services.analysis.intent_orchestrator import IntentClassificationOrchestrator
-from intent_schemas import IntentAnalysisResult as ProductionResult
+from app.services.analysis.intent_schemas import IntentAnalysisResult as ProductionResult
 from app.models.enhanced_schemas import IntentAnalysis
 from app.config import settings
 

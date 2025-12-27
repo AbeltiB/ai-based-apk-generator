@@ -37,6 +37,24 @@ def setup_logging() -> None:
         "<level>{message}</level>"
     )
     
+    # Add file handler with rotation
+    logger.add(
+        "logs/detailed_{time}.log",
+        format=dev_format,
+        level="DEBUG",
+        rotation="100 MB",
+        retention="7 days",
+        compression="zip"
+    )
+    
+    # Console handler
+    logger.add(
+        sys.stdout,
+        format=dev_format,
+        level=settings.log_level,
+        colorize=True
+    )
+    
     # Production format: structured, parseable
     prod_format = (
         "{time:YYYY-MM-DD HH:mm:ss} | "

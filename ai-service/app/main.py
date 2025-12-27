@@ -23,7 +23,7 @@ from app.core.cache import cache_manager
 from app.core.database import db_manager
 from app.models.schemas import AIRequest
 from app.services.pipeline import default_pipeline
-from app.api.v1 import health
+from app.api.v1 import health, test_routes
 
 
 # ============================================================================
@@ -131,6 +131,7 @@ app.add_middleware(
 )
 
 app.include_router(health.router, prefix="/api/v1", tags=["Health"])
+app.include_router(test_routes.router, prefix="/api/v1", tags=["Testing"])
 
 
 # ============================================================================

@@ -9,6 +9,21 @@ from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from enum import Enum
 from app.services.analysis.intent_config import ClassificationTier
+class IntentType(str, Enum):
+    """Types of user intents"""
+    CREATE_APP = "create_app"
+    MODIFY_APP = "modify_app"
+    EXTEND_APP = "extend_app"
+    BUG_FIX = "bug_fix"
+    OPTIMIZE_PERFORMANCE = "optimize_performance"
+    OTHER = "other"
+class ComplexityLevel(str, Enum):
+    """Complexity levels of requests"""
+    SIMPLE = "simple"
+    MODERATE = "moderate"
+    COMPLEX = "complex"
+    VERY_COMPLEX = "very_complex"
+    
 
 
 

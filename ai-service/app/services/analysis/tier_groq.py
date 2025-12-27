@@ -5,16 +5,16 @@ Tier 2 - Fallback classification using Groq's fast inference.
 """
 import json
 import httpx
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from loguru import logger
 
-from intent_config import config, ClassificationTier
-from intent_schemas import (
+from app.services.analysis.intent_config import config, ClassificationTier
+from app.services.analysis.intent_schemas import (
     IntentAnalysisResult, IntentType, ComplexityLevel,
     ExtractedEntities, ConfidenceBreakdown, SafetyStatus,
     ActionRecommendation, ClassificationRequest
 )
-from tier_base import ClassificationTierBase
+from app.services.analysis.tier_base import ClassificationTierBase
 
 
 class GroqTier(ClassificationTierBase):

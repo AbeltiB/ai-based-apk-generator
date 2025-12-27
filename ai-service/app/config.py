@@ -2,7 +2,7 @@
 Application configuration management using Pydantic Settings.
 Loads configuration from environment variables and .env file.
 """
-from typing import Literal
+from typing import Literal, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     
     anthropic_timeout: int = 30
     """API request timeout in seconds"""
+    
+    # ============================================================================
+    # Groq API SETTINGS
+    # ============================================================================
+    groq_api_key: Optional[str] = None
+    """Groq API key (optional, for tier 2 fallback)"""
     
     # ============================================================================
     # RABBITMQ SETTINGS

@@ -3,17 +3,17 @@ Enhanced heuristic tier with fuzzy matching.
 
 Tier 3 - Fast, reliable fallback using pattern matching and NLP techniques.
 """
-from typing import List, Tuple, Set
+from typing import List, Optional, Tuple, Set
 from rapidfuzz import fuzz, process
 from loguru import logger
 
-from intent_config import config, ClassificationTier
-from intent_schemas import (
+from app.services.analysis.intent_config import config, ClassificationTier
+from app.services.analysis.intent_schemas import (
     IntentAnalysisResult, IntentType, ComplexityLevel,
     ExtractedEntities, ConfidenceBreakdown, SafetyStatus,
     ActionRecommendation, ClassificationRequest
 )
-from tier_base import ClassificationTierBase
+from app.services.analysis.tier_base import ClassificationTierBase
 
 
 class EnhancedHeuristicTier(ClassificationTierBase):
@@ -405,3 +405,6 @@ class EnhancedHeuristicTier(ClassificationTierBase):
             )
         
         return None
+    
+    def get_name(self) -> str:
+        return "heuristic"
