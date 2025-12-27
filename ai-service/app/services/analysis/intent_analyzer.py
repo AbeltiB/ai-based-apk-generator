@@ -1,305 +1,291 @@
 """
-Intent Analyzer - Claude-powered request classification.
 
-Uses Claude API to intelligently classify user requests and extract
-key entities for downstream processing.
-"""
-import json
-from typing import Dict, Any, List
-from loguru import logger
-import anthropic
-
-from app.config import settings
-from app.models.enhanced_schemas import IntentAnalysis
-
-
-class IntentAnalyzer:
-    """
-    Analyzes user prompts to determine intent and complexity.
+Usage:
+    from intent_analyzer import intent_analyzer
     
-    Uses Claude API for intelligent classification of:
-    - Intent type (new app, extend app, modify app, etc.)
-    - Complexity level (simple, medium, complex)
-    - Extracted entities (components, actions, data types)
-    - Context requirements
+    # Works exactly like your existing code
+    result = await intent_analyzer.analyze(prompt, context)
+"""
+from typing import Dict, Any, Optional
+from loguru import logger
+
+from app.services.analysis.intent_orchestrator import IntentClassificationOrchestrator
+from intent_schemas import IntentAnalysisResult as ProductionResult
+from app.models.enhanced_schemas import IntentAnalysis
+from app.config import settings
+
+
+class ProductionIntentAnalyzer:
+    """
+    Production-grade intent analyzer with multi-tier fallback.
+    
+    Drop-in replacement for your existing IntentAnalyzer class.
+    Maintains the same interface but adds enterprise features:
+    - Multi-tier fallback (Claude → Groq → Heuristic)
+    - Intelligent caching
+    - Performance monitoring
+    - Never crashes
     """
     
     def __init__(self):
-        self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        self.system_prompt = self._build_system_prompt()
+        """Initialize with API keys from settings"""
+        
+        # Initialize orchestrator
+        self.orchestrator = IntentClassificationOrchestrator(
+            claude_api_key=settings.anthropic_api_key,
+            groq_api_key=getattr(settings, 'groq_api_key', None)
+        )
+        
+        logger.info("✅ Production Intent Analyzer initialized")
+        logger.info(f"   Available tiers: {len(self.orchestrator.tiers)}")
     
-    def _build_system_prompt(self) -> str:
-        """Build system prompt for intent analysis"""
-        return """You are an expert at analyzing mobile app development requests.
-
-Your task is to analyze user prompts and classify them into structured intent data.
-
-**Intent Types:**
-- new_app: User wants to create a new application from scratch
-- extend_app: User wants to add features to existing app
-- modify_app: User wants to change/update existing features
-- clarification: User is asking for clarification or help
-- help: User needs assistance understanding something
-
-**Complexity Levels:**
-- simple: Single screen, 1-3 components, basic interactions
-- medium: 1-2 screens, 4-8 components, moderate logic
-- complex: Multiple screens, 8+ components, complex logic, API integration
-
-**Entity Extraction:**
-Extract mentions of:
-- Components: UI elements (Button, InputText, etc.)
-- Actions: User interactions (click, input, swipe, etc.)
-- Data: Data types being managed (todos, users, products, etc.)
-- Features: Specific functionality (authentication, search, notifications)
-
-**Output Format:**
-Return ONLY a valid JSON object (no markdown, no explanations):
-{
-  "intent_type": "new_app" | "extend_app" | "modify_app" | "clarification" | "help",
-  "complexity": "simple" | "medium" | "complex",
-  "confidence": 0.0-1.0,
-  "extracted_entities": {
-    "components": ["Button", "InputText", ...],
-    "actions": ["click", "input", ...],
-    "data": ["todo", "user", ...],
-    "features": ["authentication", "search", ...]
-  },
-  "requires_context": true | false,
-  "multi_turn": true | false,
-  "reasoning": "Brief explanation of classification"
-}
-
-**Examples:**
-
-Prompt: "Create a simple counter app"
-{
-  "intent_type": "new_app",
-  "complexity": "simple",
-  "confidence": 0.95,
-  "extracted_entities": {
-    "components": ["Button", "Text"],
-    "actions": ["click"],
-    "data": ["count"],
-    "features": ["increment", "decrement"]
-  },
-  "requires_context": false,
-  "multi_turn": false,
-  "reasoning": "Simple single-screen app with basic counter functionality"
-}
-
-Prompt: "Add a delete button to each todo item"
-{
-  "intent_type": "extend_app",
-  "complexity": "simple",
-  "confidence": 0.90,
-  "extracted_entities": {
-    "components": ["Button"],
-    "actions": ["click", "delete"],
-    "data": ["todo"],
-    "features": ["delete"]
-  },
-  "requires_context": true,
-  "multi_turn": true,
-  "reasoning": "Extending existing todo app with delete functionality"
-}
-
-Now analyze the following prompt."""
-    
-    async def analyze(self, prompt: str, context: Dict[str, Any] = None) -> IntentAnalysis:
+    async def analyze(
+        self,
+        prompt: str,
+        context: Optional[Dict[str, Any]] = None
+    ) -> IntentAnalysis:
         """
         Analyze user prompt to determine intent.
+        
+        This method signature matches your existing IntentAnalyzer
+        for seamless integration.
         
         Args:
             prompt: User's natural language request
             context: Optional context (conversation history, existing project)
             
         Returns:
-            IntentAnalysis object with classification results
+            IntentAnalysis object (your existing schema)
         """
-        logger.info("🔍 Analyzing intent...")
-        logger.debug(f"Prompt: {prompt[:100]}...")
-        
         try:
-            # Build user message with context
-            user_message = f"Prompt: \"{prompt}\""
-            
-            if context and context.get('has_existing_project'):
-                user_message += "\n\nNote: User has an existing project in this session."
-            
-            if context and context.get('conversation_history'):
-                history_summary = self._summarize_history(context['conversation_history'])
-                user_message += f"\n\nRecent conversation: {history_summary}"
-            
-            # Call Claude API
-            response = self.client.messages.create(
-                model=settings.anthropic_model,
-                max_tokens=1000,
-                temperature=0.2,  # Low temperature for consistent classification
-                system=self.system_prompt,
-                messages=[
-                    {"role": "user", "content": user_message}
-                ]
+            # Use orchestrator for classification
+            production_result = await self.orchestrator.classify(
+                prompt=prompt,
+                user_id=context.get('user_id', 'unknown') if context else 'unknown',
+                session_id=context.get('session_id', 'unknown') if context else 'unknown',
+                context=context
             )
             
-            # Extract response text
-            response_text = response.content[0].text.strip()
-            logger.debug(f"Claude response: {response_text[:200]}...")
+            # Convert to your existing IntentAnalysis schema
+            legacy_result = self._convert_to_legacy_schema(production_result)
             
-            # Parse JSON response
-            try:
-                # Remove markdown code blocks if present
-                if response_text.startswith("```"):
-                    response_text = response_text.split("```")[1]
-                    if response_text.startswith("json"):
-                        response_text = response_text[4:]
-                    response_text = response_text.strip()
-                
-                intent_data = json.loads(response_text)
-                
-                # Create IntentAnalysis object
-                intent = IntentAnalysis(
-                    intent_type=intent_data['intent_type'],
-                    complexity=intent_data['complexity'],
-                    confidence=intent_data['confidence'],
-                    extracted_entities=intent_data.get('extracted_entities', {}),
-                    requires_context=intent_data.get('requires_context', False),
-                    multi_turn=intent_data.get('multi_turn', False)
-                )
-                
-                logger.info(f"✅ Intent analyzed: {intent.intent_type} ({intent.complexity})")
-                logger.info(f"   Confidence: {intent.confidence:.2f}")
-                logger.info(f"   Entities: {len(intent.extracted_entities)} types")
-                if intent_data.get('reasoning'):
-                    logger.debug(f"   Reasoning: {intent_data['reasoning']}")
-                
-                return intent
-                
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse intent JSON: {e}")
-                logger.error(f"Response was: {response_text}")
-                
-                # Fallback to heuristic analysis
-                return self._fallback_analysis(prompt)
-        
+            # Log success
+            logger.info(
+                f"✅ Intent analyzed: {legacy_result.intent_type} "
+                f"(confidence: {legacy_result.confidence:.2f}, "
+                f"tier: {production_result.tier_used})"
+            )
+            
+            return legacy_result
+            
         except Exception as e:
-            logger.error(f"Intent analysis failed: {e}")
+            logger.error(f"❌ Intent analysis error: {e}")
             
-            # Fallback to heuristic analysis
-            return self._fallback_analysis(prompt)
+            # This should never happen (orchestrator never fails)
+            # But just in case, provide a safe fallback
+            return self._create_safe_fallback(prompt)
     
-    def _summarize_history(self, history: List[Dict[str, Any]]) -> str:
-        """Summarize conversation history for context"""
-        if not history or len(history) == 0:
-            return "No previous conversation"
+    def _convert_to_legacy_schema(
+        self,
+        production_result: ProductionResult
+    ) -> IntentAnalysis:
+        """
+        Convert production result to your existing IntentAnalysis schema.
         
-        # Get last 3 messages
-        recent = history[-3:] if len(history) > 3 else history
+        This ensures compatibility with your existing pipeline.
+        """
         
-        summary_parts = []
-        for msg in recent:
-            role = msg.get('role', 'unknown')
-            content = msg.get('content', '')
-            if isinstance(content, str):
-                # Truncate long messages
-                content = content[:100] + "..." if len(content) > 100 else content
-                summary_parts.append(f"{role}: {content}")
-        
-        return " | ".join(summary_parts)
+        # Map production schema to legacy schema
+        return IntentAnalysis(
+            intent_type=production_result.intent_type.value,
+            complexity=production_result.complexity.value,
+            confidence=production_result.confidence.overall,
+            extracted_entities={
+                "components": production_result.extracted_entities.components,
+                "actions": production_result.extracted_entities.actions,
+                "data": production_result.extracted_entities.data_types,
+                "features": production_result.extracted_entities.features
+            },
+            requires_context=production_result.requires_context,
+            multi_turn=production_result.multi_turn
+        )
     
-    def _fallback_analysis(self, prompt: str) -> IntentAnalysis:
-        """
-        Fallback heuristic-based intent analysis.
-        
-        Used when Claude API fails or returns invalid data.
-        """
-        logger.warning("Using fallback heuristic intent analysis")
-        
-        prompt_lower = prompt.lower()
-        
-        # Determine intent type
-        if any(word in prompt_lower for word in ['create', 'build', 'make', 'new', 'generate']):
-            intent_type = "new_app"
-        elif any(word in prompt_lower for word in ['add', 'extend', 'include', 'also']):
-            intent_type = "extend_app"
-        elif any(word in prompt_lower for word in ['change', 'modify', 'update', 'fix', 'replace']):
-            intent_type = "modify_app"
-        elif any(word in prompt_lower for word in ['what', 'how', 'why', 'explain']):
-            intent_type = "clarification"
-        else:
-            intent_type = "new_app"
-        
-        # Determine complexity
-        word_count = len(prompt.split())
-        component_mentions = sum(1 for comp in settings.available_components 
-                                if comp.lower() in prompt_lower)
-        
-        if word_count < 10 and component_mentions <= 2:
-            complexity = "simple"
-        elif word_count < 30 and component_mentions <= 5:
-            complexity = "medium"
-        else:
-            complexity = "complex"
-        
-        # Extract basic entities
-        components = [comp for comp in settings.available_components 
-                     if comp.lower() in prompt_lower]
+    def _create_safe_fallback(self, prompt: str) -> IntentAnalysis:
+        """Create safe fallback (should never be needed)"""
+        logger.warning("⚠️  Using emergency fallback")
         
         return IntentAnalysis(
-            intent_type=intent_type,
-            complexity=complexity,
-            confidence=0.6,  # Lower confidence for heuristic
+            intent_type="clarification",
+            complexity="medium",
+            confidence=0.3,
             extracted_entities={
-                "components": components,
+                "components": [],
                 "actions": [],
                 "data": [],
                 "features": []
             },
-            requires_context=intent_type in ["extend_app", "modify_app"],
+            requires_context=False,
             multi_turn=False
         )
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get monitoring statistics"""
+        return self.orchestrator.get_stats()
+    
+    def reset_stats(self):
+        """Reset statistics"""
+        self.orchestrator.reset_stats()
+    
+    def clear_cache(self):
+        """Clear classification cache"""
+        self.orchestrator.clear_cache()
 
 
-# Global intent analyzer instance
-intent_analyzer = IntentAnalyzer()
+# ============================================================================
+# GLOBAL INSTANCE - Drop-in replacement
+# ============================================================================
 
+intent_analyzer = ProductionIntentAnalyzer()
+
+
+# ============================================================================
+# MIGRATION GUIDE
+# ============================================================================
+
+"""
+MIGRATION GUIDE - How to integrate this into your existing code:
+
+1. INSTALL DEPENDENCIES:
+   ```bash
+   poetry add rapidfuzz httpx
+   ```
+
+2. ADD GROQ API KEY (Optional, for Tier 2):
+   In your .env file:
+   ```
+   GROQ_API_KEY=your-groq-key-here
+   ```
+   
+   In app/config.py, add:
+   ```python
+   groq_api_key: Optional[str] = None
+   ```
+
+3. REPLACE YOUR EXISTING INTENT ANALYZER:
+   
+   OLD (app/services/analysis/intent_analyzer.py):
+   ```python
+   from app.models.enhanced_schemas import IntentAnalysis
+   
+   class IntentAnalyzer:
+       async def analyze(self, prompt, context):
+           # ... old code ...
+   
+   intent_analyzer = IntentAnalyzer()
+   ```
+   
+   NEW (just replace the file content):
+   ```python
+   from intent_analyzer_production import intent_analyzer
+   ```
+   
+   That's it! The interface is identical.
+
+4. COPY NEW FILES to your project:
+   - intent_config.py → app/services/analysis/intent/
+   - intent_schemas.py → app/services/analysis/intent/
+   - tier_base.py → app/services/analysis/intent/
+   - tier_claude.py → app/services/analysis/intent/
+   - tier_groq.py → app/services/analysis/intent/
+   - tier_heuristic.py → app/services/analysis/intent/
+   - intent_orchestrator.py → app/services/analysis/intent/
+   - intent_analyzer_production.py → app/services/analysis/
+
+5. UPDATE IMPORTS in your pipeline:
+   ```python
+   # In app/services/pipeline.py
+   from app.services.analysis.intent_analyzer_production import intent_analyzer
+   ```
+
+6. THAT'S IT! Your existing code works unchanged.
+
+MONITORING:
+Access statistics anytime:
+```python
+stats = intent_analyzer.get_stats()
+print(f"Cache hit rate: {stats['cache_hit_rate']:.1f}%")
+print(f"Success rate: {stats['success_rate']:.1f}%")
+print(f"Avg latency: {stats['avg_latency_ms']:.0f}ms")
+```
+
+BENEFITS:
+✅ Drop-in replacement - no code changes needed
+✅ Multi-tier fallback - never fails
+✅ Intelligent caching - faster responses
+✅ Cost tracking - monitor API usage
+✅ Performance monitoring - built-in metrics
+✅ Safety checks - blocks malicious requests
+✅ Confidence-based decisions - automatic clarification
+✅ Production-ready - enterprise-grade reliability
+"""
+
+
+# ============================================================================
+# TESTING
+# ============================================================================
 
 if __name__ == "__main__":
-    # Test intent analyzer
     import asyncio
     
-    async def test_intent_analyzer():
-        """Test intent analysis"""
-        print("\n" + "=" * 60)
-        print("INTENT ANALYZER TEST")
-        print("=" * 60)
+    async def test_production_analyzer():
+        """Test the production analyzer"""
         
-        test_prompts = [
-            "Create a simple counter app with increment and decrement buttons",
-            "Add a delete button to each todo item",
-            "Make the login button blue instead of red",
-            "Build a complete e-commerce app with product listings, cart, and checkout",
-            "How do I add a map component?"
+        print("\n" + "=" * 70)
+        print("TESTING PRODUCTION INTENT ANALYZER")
+        print("=" * 70)
+        
+        test_cases = [
+            {
+                "prompt": "Create a simple todo list app",
+                "context": {"user_id": "test_user", "session_id": "test_session"}
+            },
+            {
+                "prompt": "Add delete buttons to existing app",
+                "context": {
+                    "user_id": "test_user",
+                    "session_id": "test_session",
+                    "has_existing_project": True
+                }
+            },
+            {
+                "prompt": "Build e-commerce with payment and auth",
+                "context": {"user_id": "test_user", "session_id": "test_session"}
+            }
         ]
         
-        for i, prompt in enumerate(test_prompts, 1):
-            print(f"\n[{i}/{len(test_prompts)}] Analyzing: \"{prompt}\"")
+        for i, test in enumerate(test_cases, 1):
+            print(f"\n[{i}/{len(test_cases)}] Testing: \"{test['prompt']}\"")
             
-            intent = await intent_analyzer.analyze(prompt)
+            result = await intent_analyzer.analyze(
+                prompt=test['prompt'],
+                context=test['context']
+            )
             
-            print(f"   Intent: {intent.intent_type}")
-            print(f"   Complexity: {intent.complexity}")
-            print(f"   Confidence: {intent.confidence:.2f}")
-            print(f"   Requires Context: {intent.requires_context}")
-            print(f"   Multi-turn: {intent.multi_turn}")
-            
-            if intent.extracted_entities:
-                for entity_type, entities in intent.extracted_entities.items():
-                    if entities:
-                        print(f"   {entity_type.capitalize()}: {', '.join(entities)}")
+            print(f"   Intent: {result.intent_type}")
+            print(f"   Complexity: {result.complexity}")
+            print(f"   Confidence: {result.confidence:.2f}")
+            print(f"   Entities: {len(result.extracted_entities.get('components', []))} components")
         
-        print("\n" + "=" * 60)
-        print("✅ Intent analyzer test complete!")
-        print("=" * 60 + "\n")
+        # Show stats
+        print("\n" + "=" * 70)
+        print("STATISTICS")
+        print("=" * 70)
+        
+        stats = intent_analyzer.get_stats()
+        print(f"Total: {stats['total_classifications']}")
+        print(f"Cache Hit Rate: {stats.get('cache_hit_rate', 0):.1f}%")
+        print(f"Success Rate: {stats.get('success_rate', 100):.1f}%")
+        
+        print("\n" + "=" * 70 + "\n")
     
-    asyncio.run(test_intent_analyzer())
+    asyncio.run(test_production_analyzer())

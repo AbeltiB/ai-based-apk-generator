@@ -35,6 +35,8 @@ python-multipart = "^0.0.20"
 
 # Monitoring
 prometheus-client = "^0.21.0"
+rapidfuzz = "^3.14.3"
+httpx = "^0.28.1"
 
 [tool.poetry.group.dev.dependencies]
 # Testing

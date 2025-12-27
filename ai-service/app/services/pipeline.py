@@ -1,11 +1,10 @@
 """
-Main pipeline orchestrator for AI request processing - Phase 2 Enhanced.
+Main pipeline orchestrator for AI request processing - Phase 5 COMPLETE.
 
-Now includes:
-- Claude-powered intent analysis
-- Enhanced context building
-- Semantic caching
-- Rate limiting
+All generation stages now operational:
+- Phase 3: Architecture generation (Claude)
+- Phase 4: Layout generation (Claude)
+- Phase 5: Blockly generation (Claude)
 """
 import asyncio
 import time
@@ -47,7 +46,7 @@ class PipelineStage:
 
 
 class Pipeline:
-    """Main pipeline orchestrator with Phase 2 enhancements"""
+    """Main pipeline orchestrator - Phase 5 Complete"""
     
     def __init__(self):
         self.stages: list[PipelineStage] = []
@@ -207,7 +206,7 @@ class Pipeline:
 
 
 # ============================================================================
-# PHASE 2 ENHANCED STAGES
+# PIPELINE STAGES (Phase 5 Complete)
 # ============================================================================
 
 class RateLimitStage(PipelineStage):
@@ -366,70 +365,209 @@ class ContextBuildingStage(PipelineStage):
         return context
 
 
-class GenerationStage(PipelineStage):
-    """Stage 5-7: AI generation (placeholder for Phase 3-5)"""
+class ArchitectureGenerationStage(PipelineStage):
+    """Stage 5: Architecture generation with Claude (Phase 3)"""
     
     def __init__(self):
-        super().__init__("generation")
+        super().__init__("architecture_generation")
     
     async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate architecture, layout, and blockly"""
+        """Generate architecture using Claude"""
         
         # Skip if we have cached result
         if context.get('skip_generation'):
-            logger.info("Skipping generation (cached result)")
+            logger.info("Skipping architecture generation (cached result)")
             return context
         
-        logger.info("⚙️  Generating AI content...")
+        logger.info("🏗️  Generating architecture with Claude...")
         
-        # Placeholder - will implement actual generation in Phase 3-5
-        context['architecture'] = {
-            "app_type": "single-page",
-            "app_name": "Generated App",
-            "description": f"App based on: {context['prompt'][:50]}...",
-            "screens": [
-                {
-                    "screen_id": "screen_1",
-                    "name": "Main Screen",
-                    "purpose": "Main functionality",
-                    "required_components": []
-                }
-            ],
-            "navigation": {"type": "none", "config": {}},
-            "global_state": [],
-            "data_flow": {
-                "user_interactions": [],
-                "api_endpoints": [],
-                "local_storage_keys": [],
-                "external_dependencies": []
-            }
-        }
+        from app.services.generation.architecture_generator import architecture_generator
+        from app.services.generation.architecture_validator import architecture_validator
         
-        context['layout'] = {
-            "screen_id": "screen_1",
-            "canvas": {
-                "width": 375,
-                "height": 667,
-                "background_color": "#FFFFFF",
-                "safe_area_insets": {"top": 44, "bottom": 34, "left": 0, "right": 0}
-            },
-            "components": [],
-            "layout_metadata": {}
-        }
+        try:
+            # Generate architecture
+            architecture, metadata = await architecture_generator.generate(
+                prompt=context['prompt'],
+                context=context.get('enriched_context')
+            )
+            
+            # Validate architecture
+            is_valid, warnings = await architecture_validator.validate(architecture)
+            
+            if not is_valid:
+                error_warnings = [w for w in warnings if w.level == "error"]
+                raise ValueError(f"Invalid architecture: {len(error_warnings)} error(s)")
+            
+            # Store results
+            context['architecture'] = architecture.dict()
+            context['architecture_metadata'] = metadata
+            context['architecture_warnings'] = [w.to_dict() for w in warnings]
+            
+            # Log warnings
+            warning_count = sum(1 for w in warnings if w.level == "warning")
+            if warning_count > 0:
+                logger.warning(f"Architecture has {warning_count} warning(s)")
+                for w in warnings:
+                    if w.level == "warning":
+                        logger.debug(str(w))
+            
+            logger.info(f"✅ Architecture generated: {architecture.app_type}, {len(architecture.screens)} screen(s)")
+            
+            return context
+            
+        except Exception as e:
+            logger.error(f"Architecture generation failed: {e}")
+            raise
+
+
+class LayoutGenerationStage(PipelineStage):
+    """Stage 6: Layout generation with Claude (Phase 4)"""
+    
+    def __init__(self):
+        super().__init__("layout_generation")
+    
+    async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate layout for each screen"""
         
-        context['blockly'] = {
-            "blocks": {
-                "languageVersion": 0,
-                "blocks": []
-            },
-            "variables": [],
-            "custom_blocks": []
-        }
+        # Skip if we have cached result
+        if context.get('skip_generation'):
+            logger.info("Skipping layout generation (cached result)")
+            return context
         
-        # Simulate generation time
-        await asyncio.sleep(2.0)
+        logger.info("📐 Generating layouts with Claude...")
         
-        return context
+        from app.services.generation.layout_generator import layout_generator
+        from app.services.generation.layout_validator import layout_validator
+        
+        try:
+            architecture = context.get('architecture')
+            if not architecture:
+                raise ValueError("No architecture found in context")
+            
+            # Parse architecture
+            from app.models.schemas import ArchitectureDesign
+            arch_design = ArchitectureDesign(**architecture)
+            
+            # Generate layout for each screen
+            layouts = {}
+            all_warnings = []
+            
+            for screen in arch_design.screens:
+                logger.info(f"Generating layout for screen: {screen.name}")
+                
+                # Generate layout
+                layout, metadata = await layout_generator.generate(
+                    architecture=arch_design,
+                    screen_id=screen.id
+                )
+                
+                # Validate layout
+                is_valid, warnings = await layout_validator.validate(layout)
+                
+                if not is_valid:
+                    error_warnings = [w for w in warnings if w.level == "error"]
+                    raise ValueError(f"Invalid layout for {screen.name}: {len(error_warnings)} error(s)")
+                
+                # Store layout
+                layouts[screen.id] = layout.dict()
+                
+                # Collect warnings
+                all_warnings.extend([
+                    {**w.to_dict(), 'screen_id': screen.id}
+                    for w in warnings
+                ])
+                
+                # Log warnings
+                warning_count = sum(1 for w in warnings if w.level == "warning")
+                if warning_count > 0:
+                    logger.warning(f"Layout for {screen.name} has {warning_count} warning(s)")
+            
+            # Store results
+            context['layout'] = layouts if len(layouts) > 1 else list(layouts.values())[0]
+            context['layout_warnings'] = all_warnings
+            
+            logger.info(f"✅ Generated layouts for {len(layouts)} screen(s)")
+            
+            return context
+            
+        except Exception as e:
+            logger.error(f"Layout generation failed: {e}")
+            raise
+
+
+class BlocklyGenerationStage(PipelineStage):
+    """Stage 7: Blockly generation with Claude (Phase 5)"""
+    
+    def __init__(self):
+        super().__init__("blockly_generation")
+    
+    async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate Blockly blocks"""
+        
+        # Skip if we have cached result
+        if context.get('skip_generation'):
+            logger.info("Skipping blockly generation (cached result)")
+            return context
+        
+        logger.info("🧩 Generating Blockly blocks with Claude...")
+        
+        from app.services.generation.blockly_generator import blockly_generator
+        from app.services.generation.blockly_validator import blockly_validator
+        
+        try:
+            architecture = context.get('architecture')
+            layout = context.get('layout')
+            
+            if not architecture or not layout:
+                raise ValueError("No architecture or layout found in context")
+            
+            # Parse architecture
+            from app.models.schemas import ArchitectureDesign
+            arch_design = ArchitectureDesign(**architecture)
+            
+            # Parse layouts
+            from app.models.enhanced_schemas import EnhancedLayoutDefinition
+            
+            layouts = {}
+            if isinstance(layout, dict):
+                if 'components' in layout:
+                    # Single screen layout
+                    layouts[layout['screen_id']] = EnhancedLayoutDefinition(**layout)
+                else:
+                    # Multiple screens
+                    for screen_id, screen_layout in layout.items():
+                        layouts[screen_id] = EnhancedLayoutDefinition(**screen_layout)
+            
+            # Generate Blockly
+            blockly, metadata = await blockly_generator.generate(
+                architecture=arch_design,
+                layouts=layouts
+            )
+            
+            # Validate Blockly
+            is_valid, warnings = await blockly_validator.validate(blockly)
+            
+            if not is_valid:
+                error_warnings = [w for w in warnings if w.level == "error"]
+                raise ValueError(f"Invalid Blockly: {len(error_warnings)} error(s)")
+            
+            # Store results
+            context['blockly'] = blockly
+            context['blockly_metadata'] = metadata
+            context['blockly_warnings'] = [w.to_dict() for w in warnings]
+            
+            # Log warnings
+            warning_count = sum(1 for w in warnings if w.level == "warning")
+            if warning_count > 0:
+                logger.warning(f"Blockly has {warning_count} warning(s)")
+            
+            logger.info(f"✅ Blockly generated: {len(blockly['blocks']['blocks'])} blocks")
+            
+            return context
+            
+        except Exception as e:
+            logger.error(f"Blockly generation failed: {e}")
+            raise
 
 
 class CacheStoreStage(PipelineStage):
@@ -561,7 +699,11 @@ class PublishingStage(PipelineStage):
                 "intent": {
                     "type": context.get('intent', {}).intent_type if hasattr(context.get('intent'), 'intent_type') else "unknown",
                     "complexity": context.get('intent', {}).complexity if hasattr(context.get('intent'), 'complexity') else "unknown"
-                }
+                },
+                # Phase-specific metadata
+                "architecture_metadata": context.get('architecture_metadata', {}),
+                "layout_warnings": context.get('layout_warnings', []),
+                "blockly_warnings": context.get('blockly_warnings', [])
             },
             "conversation": {
                 "message_id": context.get('conversation_id', ''),
@@ -578,45 +720,47 @@ class PublishingStage(PipelineStage):
 
 
 # ============================================================================
-# CREATE PHASE 2 PIPELINE
+# CREATE PHASE 5 COMPLETE PIPELINE
 # ============================================================================
 
-def create_phase2_pipeline() -> Pipeline:
+def create_phase5_pipeline() -> Pipeline:
     """
-    Create Phase 2 enhanced pipeline.
+    Create Phase 5 complete pipeline with all generation stages.
     
     Returns:
-        Configured pipeline with all Phase 2 features
+        Configured pipeline with all Phase 5 features (COMPLETE)
     """
     pipeline = Pipeline()
     
-    # Add all stages (Phase 2 enhanced)
-    pipeline.add_stage(RateLimitStage())          # New in Phase 2
-    pipeline.add_stage(ValidationStage())
-    pipeline.add_stage(CacheCheckStage())         # New in Phase 2
-    pipeline.add_stage(IntentAnalysisStage())     # Enhanced in Phase 2
-    pipeline.add_stage(ContextBuildingStage())    # Enhanced in Phase 2
-    pipeline.add_stage(GenerationStage())         # Placeholder
-    pipeline.add_stage(CacheStoreStage())         # New in Phase 2
-    pipeline.add_stage(PersistenceStage())
-    pipeline.add_stage(PublishingStage())
+    # Add all stages (Phase 5 COMPLETE)
+    pipeline.add_stage(RateLimitStage())                  # Stage 0
+    pipeline.add_stage(ValidationStage())                 # Stage 1
+    pipeline.add_stage(CacheCheckStage())                 # Stage 2
+    pipeline.add_stage(IntentAnalysisStage())             # Stage 3
+    pipeline.add_stage(ContextBuildingStage())            # Stage 4
+    pipeline.add_stage(ArchitectureGenerationStage())     # Stage 5 (Phase 3) ✅
+    pipeline.add_stage(LayoutGenerationStage())           # Stage 6 (Phase 4) ✅
+    pipeline.add_stage(BlocklyGenerationStage())          # Stage 7 (Phase 5) ✅
+    pipeline.add_stage(CacheStoreStage())                 # Stage 8
+    pipeline.add_stage(PersistenceStage())                # Stage 9
+    pipeline.add_stage(PublishingStage())                 # Stage 10
     
     return pipeline
 
 
-# Global pipeline instance
-default_pipeline = create_phase2_pipeline()
+# Global pipeline instance (Phase 5 COMPLETE!)
+default_pipeline = create_phase5_pipeline()
 
 
 if __name__ == "__main__":
-    # Test Phase 2 pipeline
+    # Test Phase 5 complete pipeline
     import asyncio
     from app.models.schemas import AIRequest
     
-    async def test_phase2_pipeline():
-        """Test Phase 2 pipeline"""
+    async def test_phase5_pipeline():
+        """Test Phase 5 complete pipeline"""
         print("\n" + "=" * 60)
-        print("PHASE 2 PIPELINE TEST")
+        print("PHASE 5 COMPLETE PIPELINE TEST")
         print("=" * 60)
         
         # Connect dependencies
@@ -626,10 +770,10 @@ if __name__ == "__main__":
         
         # Create test request
         request = AIRequest(
-            user_id="test_user_phase2",
-            session_id="test_session_phase2",
-            socket_id="test_socket_phase2",
-            prompt="Create a simple counter app with increment and decrement buttons"
+            user_id="test_user_phase5",
+            session_id="test_session_phase5",
+            socket_id="test_socket_phase5",
+            prompt="Create a counter app with number display and + - buttons"
         )
         
         # Execute pipeline
@@ -638,10 +782,23 @@ if __name__ == "__main__":
             print(f"\n✅ Pipeline completed successfully")
             print(f"   Total time: {result['total_time_ms']}ms")
             print(f"   Cache hit: {result.get('cache_hit', False)}")
-            print(f"   Intent: {result.get('intent', {}).intent_type if hasattr(result.get('intent'), 'intent_type') else 'N/A'}")
             print(f"   Stages: {len(result['stage_times'])}")
+            
+            # Show generated components
+            if 'architecture' in result:
+                print(f"\n✅ Architecture: {result['architecture']['app_type']}")
+            if 'layout' in result:
+                layout = result['layout']
+                comp_count = len(layout.get('components', [])) if isinstance(layout, dict) and 'components' in layout else 0
+                print(f"✅ Layout: {comp_count} components")
+            if 'blockly' in result:
+                block_count = len(result['blockly']['blocks']['blocks'])
+                print(f"✅ Blockly: {block_count} blocks")
+                
         except Exception as e:
             print(f"\n❌ Pipeline failed: {e}")
+            import traceback
+            traceback.print_exc()
         
         # Disconnect
         await queue_manager.disconnect()
@@ -650,4 +807,4 @@ if __name__ == "__main__":
         
         print("\n" + "=" * 60 + "\n")
     
-    asyncio.run(test_phase2_pipeline())
+    asyncio.run(test_phase5_pipeline())
