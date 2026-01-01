@@ -459,7 +459,7 @@ if __name__ == "__main__":
                     component_id="text_count",
                     component_type="Text",
                     properties={
-                        "text": PropertyValue(type="variable", value="count"),
+                        "value": PropertyValue(type="variable", value="count"),
                         "style": PropertyValue(type="literal", value={
                             "left": 97, "top": 100, "width": 180, "height": 40
                         })
@@ -469,7 +469,7 @@ if __name__ == "__main__":
                     component_id="btn_increment",
                     component_type="Button",
                     properties={
-                        "text": PropertyValue(type="literal", value="+"),
+                        "value": PropertyValue(type="literal", value="+"),
                         "style": PropertyValue(type="literal", value={
                             "left": 50, "top": 160, "width": 120, "height": 44
                         })
@@ -479,7 +479,7 @@ if __name__ == "__main__":
                     component_id="btn_decrement",
                     component_type="Button",
                     properties={
-                        "text": PropertyValue(type="literal", value="-"),
+                        "value": PropertyValue(type="literal", value="-"),
                         "style": PropertyValue(type="literal", value={
                             "left": 200, "top": 160, "width": 120, "height": 44
                         })

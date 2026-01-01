@@ -477,7 +477,7 @@ if __name__ == "__main__":
                     component_id="text_1",
                     component_type="Text",
                     properties={
-                        "text": PropertyValue(type="literal", value="Counter: 0"),
+                        "value": PropertyValue(type="literal", value="Counter: 0"),
                         "style": PropertyValue(type="literal", value={
                             "left": 97,
                             "top": 100,
@@ -490,7 +490,7 @@ if __name__ == "__main__":
                     component_id="btn_1",
                     component_type="Button",
                     properties={
-                        "text": PropertyValue(type="literal", value="+"),
+                        "value": PropertyValue(type="literal", value="+"),
                         "style": PropertyValue(type="literal", value={
                             "left": 127,
                             "top": 160,

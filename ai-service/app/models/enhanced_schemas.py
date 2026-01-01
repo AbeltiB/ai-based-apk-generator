@@ -476,7 +476,7 @@ if __name__ == "__main__":
     
     # Test component properties
     button_props = {
-        "text": PropertyValue(type="literal", value="Click Me"),
+        "value": PropertyValue(type="literal", value="Click Me"),
         "size": PropertyValue(type="literal", value="medium"),
         "color": PropertyValue(type="literal", value="#FFFFFF"),
         "backgroundColor": PropertyValue(type="literal", value="#007AFF"),

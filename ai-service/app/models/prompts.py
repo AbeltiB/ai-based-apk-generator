@@ -259,6 +259,11 @@ Return ONLY valid JSON (no markdown, no explanations) with this structure:
 4. Center align for single-column layouts
 5. Group related components together
 
+**Important Property Names:**
+- Text components: use "value" for the displayed text (e.g., bound to a variable)
+- Button components: use "value" for the button label
+- InputText: use "value" for current text, "placeholder" for hint
+
 Generate the complete layout JSON now."""
     )
     
