@@ -34,7 +34,7 @@ class CacheManager:
                 settings.redis_url,
                 encoding="utf-8",
                 decode_responses=True,
-                max_connections=10
+                max_connections=10 #TODO: Make configurable if needed
             )
             
             # Test connection

@@ -116,7 +116,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="AI-powered mobile app generation service using Claude API",
+    description="AI-powered mobile app generation service using AI",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
@@ -124,7 +124,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # configure in production
+    allow_origins=["*"], # TODO: Adjust as needed for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

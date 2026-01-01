@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     
     app_name: str = "AI App Builder Service"
     app_version: str = "0.1.0"
-    debug: bool = False
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    debug: bool = True #TODO: Set to False in production
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "DEBUG"
     
     # ============================================================================
     # ANTHROPIC CLAUDE API SETTINGS

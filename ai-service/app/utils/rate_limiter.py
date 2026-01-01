@@ -4,7 +4,6 @@ Rate Limiter - Prevent abuse and manage API quotas.
 Uses Redis for distributed rate limiting across multiple service instances.
 """
 import time
-from typing import Optional, Tuple
 from loguru import logger
 from typing import Optional, Tuple, Dict, Any
 
@@ -14,7 +13,7 @@ from app.config import settings
 
 class RateLimiter:
     """
-    Token bucket rate limiter using Redis.
+    Fixed window rate limiter using Redis.
     
     Features:
     - Per-user rate limiting
@@ -25,7 +24,7 @@ class RateLimiter:
     
     def __init__(self):
         self.prefix = "rate_limit:"
-        self.window_seconds = 3600  # 1 hour window
+        self.window_seconds = 3600  # 1 hour window TODO: Make configurable if needed
     
     async def check_rate_limit(
         self,
