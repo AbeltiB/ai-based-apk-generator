@@ -1,29 +1,34 @@
 """
-Main FastAPI application for AI App Builder Service.
+Main FastAPI application - Updated with enterprise features.
 
-This is the entry point that:
-1. Starts the FastAPI web server
-2. Connects to all infrastructures (RabbitMQ, Redis, PostgreSQL)
-3. Consumes AI requests from RabbitMQ
-4. Processes requests through the pipeline
-5. Publishes response back RabbitMQ
+New features:
+1. REST API endpoint for frontend (/api/v1/generate)
+2. Enterprise structured logging with correlation tracking
+3. Multi-tier health checks (liveness, readiness, full)
 """
-
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from loguru import logger
+from fastapi.responses import JSONResponse
+import uuid
+import time
 
 from app.config import settings
-from app.core.logger import setup_logging
 from app.core.messaging import queue_manager
 from app.core.cache import cache_manager
 from app.core.database import db_manager
 from app.models.schemas import AIRequest
 from app.services.pipeline import default_pipeline
-from app.api.v1 import health, test_routes
+
+# Import new structured logging
+from app.utils.logging import get_logger, log_context
+
+# Import routers
+from app.api.v1 import health_advanced, generate
+
+logger = get_logger(__name__)
 
 
 # ============================================================================
@@ -32,81 +37,75 @@ from app.api.v1 import health, test_routes
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Lifespan context manager for startup and shutdown events.
-    """
-
-    # ------------------------------------------------------------------------
-    # STARTUP
-    # ------------------------------------------------------------------------
-
-    logger.info("=" * 60)
-    logger.info(f"🚀 Starting {settings.app_name} v{settings.app_version}")
-    logger.info("=" * 60)
-
-    setup_logging()
-    logger.info("✅ Logging configured")
-
-    # RabbitMQ
-    try:
-        await queue_manager.connect()
-        logger.info("✅ RabbitMQ connected")
-    except Exception as e:
-        logger.error(f"❌ RabbitMQ connection failed: {e}")
-        raise
-
-    # Redis
-    try:
-        await cache_manager.connect()
-        logger.info("✅ Redis cache connected")
-    except Exception as e:
-        logger.warning(f"⚠️ Redis connection failed: {e}")
-        logger.warning("   Continuing without cache (degraded performance)")
-
-    # PostgreSQL
-    try:
-        await db_manager.connect()
-        logger.info("✅ PostgreSQL connected")
-    except Exception as e:
-        logger.error(f"❌ PostgreSQL connection failed: {e}")
-        raise
-
-    # Start consumer
-    logger.info("👂 Starting AI request consumer...")
-    consumer_task = asyncio.create_task(consume_ai_requests())
-
-    logger.info("=" * 60)
-    logger.info("✅ Service ready to accept requests")
-    logger.info("=" * 60)
-
-    yield
-
-    # ------------------------------------------------------------------------
-    # SHUTDOWN
-    # ------------------------------------------------------------------------
-
-    logger.info("=" * 60)
-    logger.info("🛑 Shutting down service...")
-    logger.info("=" * 60)
-
-    consumer_task.cancel()
-    try:
-        await consumer_task
-    except asyncio.CancelledError:
-        logger.info("✅ Consumer task cancelled")
-
-    await queue_manager.disconnect()
-    logger.info("✅ RabbitMQ disconnected")
-
-    await cache_manager.disconnect()
-    logger.info("✅ Redis disconnected")
-
-    await db_manager.disconnect()
-    logger.info("✅ PostgreSQL disconnected")
-
-    logger.info("=" * 60)
-    logger.info("✅ Shutdown complete")
-    logger.info("=" * 60)
+    """Application lifespan with structured logging"""
+    
+    correlation_id = str(uuid.uuid4())
+    
+    with log_context(correlation_id=correlation_id, operation="startup"):
+        logger.info(
+            "app.startup.started",
+            extra={
+                "service": settings.app_name,
+                "version": settings.app_version,
+                "debug": settings.debug
+            }
+        )
+        
+        # RabbitMQ
+        try:
+            await queue_manager.connect()
+            logger.info("app.startup.rabbitmq.connected")
+        except Exception as e:
+            logger.critical("app.startup.rabbitmq.failed", exc_info=e)
+            raise
+        
+        # Redis
+        try:
+            await cache_manager.connect()
+            logger.info("app.startup.redis.connected")
+        except Exception as e:
+            logger.error("app.startup.redis.failed", exc_info=e)
+            logger.warning("app.startup.redis.degraded_mode", message="Continuing without cache")
+        
+        # PostgreSQL
+        try:
+            await db_manager.connect()
+            logger.info("app.startup.postgresql.connected")
+        except Exception as e:
+            logger.critical("app.startup.postgresql.failed", exc_info=e)
+            raise
+        
+        # Start consumer
+        logger.info("app.startup.consumer.starting")
+        consumer_task = asyncio.create_task(consume_ai_requests())
+        
+        logger.info(
+            "app.startup.completed",
+            extra={"status": "ready"}
+        )
+        
+        yield
+        
+        # Shutdown
+        with log_context(correlation_id=str(uuid.uuid4()), operation="shutdown"):
+            logger.info("app.shutdown.started")
+            
+            consumer_task.cancel()
+            try:
+                await consumer_task
+            except asyncio.CancelledError:
+                logger.info("app.shutdown.consumer.cancelled")
+            
+            await queue_manager.disconnect()
+            logger.info("app.shutdown.rabbitmq.disconnected")
+            
+            await cache_manager.disconnect()
+            logger.info("app.shutdown.redis.disconnected")
+            
+            await db_manager.disconnect()
+            logger.info("app.shutdown.postgresql.disconnected")
+            
+            logger.info("app.shutdown.completed")
 
 
 # ============================================================================
@@ -116,22 +115,129 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="AI-powered mobile app generation service using AI",
+    description="AI-powered mobile app generation service with enterprise features",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
 )
 
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # TODO: Adjust as needed for production
+    allow_origins=["*"],  # TODO: Configure for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(health.router, prefix="/api/v1", tags=["Health"])
-app.include_router(test_routes.router, prefix="/api/v1", tags=["Testing"])
+
+# ============================================================================
+# REQUEST/RESPONSE LOGGING MIDDLEWARE
+# ============================================================================
+
+@app.middleware("http")
+async def logging_middleware(request: Request, call_next):
+    """Log all HTTP requests with correlation tracking"""
+    
+    # Generate correlation ID
+    correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
+    
+    start_time = time.time()
+    
+    with log_context(
+        correlation_id=correlation_id,
+        endpoint=request.url.path,
+        method=request.method
+    ):
+        logger.info(
+            "http.request.received",
+            extra={
+                "path": request.url.path,
+                "method": request.method,
+                "client_ip": request.client.host if request.client else None,
+                "user_agent": request.headers.get("user-agent")
+            }
+        )
+        
+        try:
+            response = await call_next(request)
+            
+            duration_ms = (time.time() - start_time) * 1000
+            
+            logger.performance(
+                "http.request.completed",
+                duration_ms=duration_ms,
+                extra={
+                    "status_code": response.status_code,
+                    "path": request.url.path,
+                    "method": request.method
+                }
+            )
+            
+            # Add correlation ID to response headers
+            response.headers["X-Correlation-ID"] = correlation_id
+            
+            return response
+            
+        except Exception as e:
+            duration_ms = (time.time() - start_time) * 1000
+            
+            logger.error(
+                "http.request.failed",
+                extra={
+                    "path": request.url.path,
+                    "method": request.method,
+                    "duration_ms": duration_ms
+                },
+                exc_info=e
+            )
+            raise
+
+
+# ============================================================================
+# EXCEPTION HANDLERS
+# ============================================================================
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Global exception handler with structured logging"""
+    
+    logger.error(
+        "app.exception.unhandled",
+        extra={
+            "path": request.url.path,
+            "method": request.method,
+            "exception_type": type(exc).__name__
+        },
+        exc_info=exc
+    )
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "internal_server_error",
+            "message": "An unexpected error occurred. Please try again later.",
+            "correlation_id": request.headers.get("X-Correlation-ID", "unknown")
+        }
+    )
+
+
+# ============================================================================
+# ROUTERS
+# ============================================================================
+
+# Health checks (multi-tier)
+app.include_router(
+    health_advanced.router,
+    tags=["Health"]
+)
+
+# Generation endpoint (frontend API)
+app.include_router(
+    generate.router,
+    prefix="/api/v1",
+    tags=["Generation"]
+)
 
 
 # ============================================================================
@@ -139,69 +245,85 @@ app.include_router(test_routes.router, prefix="/api/v1", tags=["Testing"])
 # ============================================================================
 
 async def consume_ai_requests():
-    """
-    Main consumer loop - listens to RabbitMQ ai-requests queue.
-    """
-
+    """Main consumer loop with structured logging"""
+    
     logger.info(
-        f"👂 Listening for AI requests on queue: "
-        f"{settings.rabbitmq_queue_ai_requests}"
+        "consumer.started",
+        extra={"queue": settings.rabbitmq_queue_ai_requests}
     )
-
+    
     async def message_handler(message_body: dict):
+        """Handle incoming AI request with correlation tracking"""
+        
         try:
             request = AIRequest(**message_body)
-
-            logger.info(f"📥 Received AI request - Task: {request.task_id}")
-            logger.debug(f"   User: {request.user_id}")
-            logger.debug(f"   Prompt: {request.prompt[:100]}...")
-
-            await default_pipeline.send_progress(
+            
+            # Set up logging context for entire request processing
+            with log_context(
+                correlation_id=str(uuid.uuid4()),
                 task_id=request.task_id,
-                socket_id=request.socket_id,
-                stage="analyzing",
-                progress=5,
-                message="Starting AI processing...",
-            )
-
-            try:
-                result = await default_pipeline.execute(request)
-                logger.info(f"✅ Request completed - Task: {request.task_id}")
-                logger.debug(
-                    f"   Total time: {result.get('total_time_ms', 0)}ms"
+                user_id=request.user_id,
+                session_id=request.session_id
+            ):
+                logger.info(
+                    "consumer.message.received",
+                    extra={
+                        "prompt_length": len(request.prompt),
+                        "has_context": request.context is not None
+                    }
                 )
-            except Exception as pipeline_error:
-                logger.error(f"❌ Pipeline execution failed: {pipeline_error}")
-
-                await default_pipeline.send_error(
+                
+                # Send initial progress
+                await default_pipeline.send_progress(
                     task_id=request.task_id,
                     socket_id=request.socket_id,
-                    error="Pipeline execution failed",
-                    details=str(pipeline_error),
+                    stage="analyzing",
+                    progress=5,
+                    message="Starting AI processing..."
                 )
-
+                
+                try:
+                    # Execute pipeline
+                    result = await default_pipeline.execute(request)
+                    
+                    logger.info(
+                        "consumer.message.completed",
+                        extra={
+                            "total_time_ms": result.get('total_time_ms', 0),
+                            "cache_hit": result.get('cache_hit', False)
+                        }
+                    )
+                    
+                except Exception as pipeline_error:
+                    logger.error(
+                        "consumer.pipeline.failed",
+                        exc_info=pipeline_error
+                    )
+                    
+                    await default_pipeline.send_error(
+                        task_id=request.task_id,
+                        socket_id=request.socket_id,
+                        error="Pipeline execution failed",
+                        details=str(pipeline_error)
+                    )
+        
         except Exception as e:
-            logger.error(f"❌ Error processing request: {e}")
-
-            try:
-                await default_pipeline.send_error(
-                    task_id=message_body.get("task_id", "unknown"),
-                    socket_id=message_body.get("socket_id", "unknown"),
-                    error="Failed to process request",
-                    details=str(e),
-                )
-            except Exception as send_error:
-                logger.error(
-                    f"❌ Failed to send error response: {send_error}"
-                )
-
+            logger.error(
+                "consumer.message.processing_failed",
+                extra={"error_type": type(e).__name__},
+                exc_info=e
+            )
+    
     try:
         await queue_manager.consume(
             queue_name=settings.rabbitmq_queue_ai_requests,
-            callback=message_handler,
+            callback=message_handler
         )
     except Exception as e:
-        logger.error(f"❌ Consume error: {e}")
+        logger.critical(
+            "consumer.failed",
+            exc_info=e
+        )
         raise
 
 
@@ -211,17 +333,20 @@ async def consume_ai_requests():
 
 @app.get("/")
 async def root():
+    """Root endpoint with service info"""
     return {
         "service": settings.app_name,
         "version": settings.app_version,
         "status": "running",
         "docs": "/docs",
-        "health": "/api/v1/health",
-        "features": {
-            "rabbitmq": queue_manager.is_connected,
-            "redis": cache_manager._connected,
-            "postgresql": db_manager.is_connected,
+        "health": {
+            "liveness": "/health/live",
+            "readiness": "/health/ready",
+            "full": "/health/full"
         },
+        "api": {
+            "generate": "POST /api/v1/generate"
+        }
     }
 
 
@@ -231,7 +356,16 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
-
+    
+    logger.info(
+        "app.dev_server.starting",
+        extra={
+            "host": "0.0.0.0",
+            "port": 8000,
+            "reload": settings.debug
+        }
+    )
+    
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",

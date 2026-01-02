@@ -37,6 +37,7 @@ python-multipart = "^0.0.20"
 prometheus-client = "^0.21.0"
 rapidfuzz = "^3.14.3"
 httpx = "^0.28.1"
+python-json-logger = "^4.0.0"
 
 [tool.poetry.group.dev.dependencies]
 # Testing
