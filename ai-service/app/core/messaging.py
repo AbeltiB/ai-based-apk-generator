@@ -11,6 +11,7 @@ from aio_pika.abc import AbstractRobustConnection, AbstractIncomingMessage
 from loguru import logger
 
 from app.config import settings
+from app.utils.serialization import json_safe
 
 
 class QueueManager:
@@ -101,7 +102,7 @@ class QueueManager:
         
         try:
             # Serialize to JSON
-            body = json.dumps(response).encode('utf-8')
+            body = json.dumps(response, default=json_safe).encode('utf-8')
             
             # Create message
             message = Message(

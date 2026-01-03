@@ -111,17 +111,17 @@ class StructuredLogger:
     def debug(self, event: str, message: str = None, extra: Dict = None, **kwargs):
         """Log debug message"""
         log_entry = self._format_log("DEBUG", event, message, extra)
-        print(json.dumps(log_entry), file=sys.stdout)
+        print(json.dumps(log_entry, default=str), file=sys.stdout)
     
     def info(self, event: str, message: str = None, extra: Dict = None, **kwargs):
         """Log info message"""
         log_entry = self._format_log("INFO", event, message, extra)
-        print(json.dumps(log_entry), file=sys.stdout)
+        print(json.dumps(log_entry, default=str), file=sys.stdout)
     
     def warning(self, event: str, message: str = None, extra: Dict = None, **kwargs):
         """Log warning message"""
         log_entry = self._format_log("WARNING", event, message, extra)
-        print(json.dumps(log_entry), file=sys.stderr)
+        print(json.dumps(log_entry, default=str), file=sys.stderr)
     
     def error(
         self,
@@ -145,7 +145,7 @@ class StructuredLogger:
     ):
         """Log critical message"""
         log_entry = self._format_log("CRITICAL", event, message, extra, exc_info)
-        print(json.dumps(log_entry), file=sys.stderr)
+        print(json.dumps(log_entry, default=str), file=sys.stderr)
     
     def performance(
         self,
@@ -165,7 +165,7 @@ class StructuredLogger:
             perf_data.update(extra)
         
         log_entry = self._format_log("INFO", event, f"Performance: {duration_ms}ms", perf_data)
-        print(json.dumps(log_entry), file=sys.stdout)
+        print(json.dumps(log_entry, default=str), file=sys.stdout)
 
 
 def get_logger(name: str) -> StructuredLogger:
