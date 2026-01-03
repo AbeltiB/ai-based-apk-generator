@@ -119,7 +119,21 @@ class ArchitectureGenerator:
         except Exception as e:
             self.stats['failed'] += 1
             logger.error(f"Architecture generation failed: {e}")
-            raise ArchitectureGenerationError(f"Failed to generate architecture: {e}")
+            logger.warning("🔁 Falling back to heuristic architecture generator")
+
+            from app.services.generation.heuristic_generator import (
+                heuristic_architecture_generator
+            )
+
+            fallback_arch = await heuristic_architecture_generator.generate(prompt)
+
+            metadata = {
+                "generation_mode": "heuristic_fallback",
+                "reason": str(e)
+            }
+
+            return fallback_arch, metadata
+
     
     @retry(
         stop=stop_after_attempt(3),
