@@ -15,6 +15,57 @@ from app.core.database import db_manager
 from app.models.enhanced_schemas import IntentAnalysis, EnrichedContext
 
 
+class ContextRelevanceScore:
+    """
+    Calculate confidence that a project is relevant to current request.
+    """
+    
+    @staticmethod
+    def calculate(
+        project: Dict[str, Any],
+        user_id: str,
+        session_id: str,
+        intent: IntentAnalysis
+    ) -> float:
+        """
+        Calculate relevance score (0.0 to 1.0).
+        
+        Args:
+            project: Project data
+            user_id: Current user ID
+            session_id: Current session ID
+            intent: Intent analysis
+            
+        Returns:
+            Relevance score (higher = more relevant)
+        """
+        score = 0.0
+        
+        # CRITICAL: Ownership verification (mandatory)
+        if project.get('user_id') != user_id:
+            return 0.0  # Wrong user - NEVER return
+        
+        # Session match (highest weight)
+        project_metadata = project.get('metadata', {})
+        if project_metadata.get('session_id') == session_id:
+            score += 0.6  # Same session = very relevant
+        
+        # Recency (within last hour)
+        updated_at = project.get('updated_at')
+        if updated_at:
+            import datetime as dt
+            age_hours = (datetime.utcnow() - updated_at).total_seconds() / 3600
+            if age_hours < 1:
+                score += 0.3
+            elif age_hours < 24:
+                score += 0.1
+        
+        # Intent match
+        if intent.requires_context:
+            score += 0.1
+        
+        return min(score, 1.0)
+    
 class ContextBuilder:
     """
     Builds enriched context for AI generation.
@@ -33,10 +84,12 @@ class ContextBuilder:
         session_id: str,
         prompt: str,
         intent: IntentAnalysis,
-        original_request: Dict[str, Any]
+        original_request: Dict[str, Any],
+        project_id: Optional[str] = None
     ) -> EnrichedContext:
         """
         Build comprehensive enriched context.
+        Fixes: Now requires explicit project_id or high-confidence match.
         
         Args:
             user_id: User identifier
@@ -48,7 +101,15 @@ class ContextBuilder:
         Returns:
             EnrichedContext with all relevant data
         """
-        logger.info("🔨 Building enriched context...")
+        logger.info("🔨 Building enriched context...",
+                    extra={
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "requires_context": intent.requires_context,
+                        "explicit_project_id": project_id is not None,
+                        "intent_type": intent.intent_type,
+                        "complexity": intent.complexity
+                    })
         
         context = EnrichedContext(
             original_request=original_request,
@@ -56,30 +117,59 @@ class ContextBuilder:
             conversation_history=[],
             existing_project=None,
             user_preferences={},
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(datetime.timezone.utc)
         )
         
         # Load conversation history
         context.conversation_history = await self._load_conversation_history(
             user_id=user_id,
             session_id=session_id,
-            limit=10
+            limit=10 #TODO: make configurable
         )
         
-        # Load existing project if needed
-        if intent.requires_context:
-            context.existing_project = await self._load_existing_project(
+        # Load existing project with strict validation
+        if intent.requires_context or project_id:
+            context.existing_project = await self._load_existing_project_safe(
                 user_id=user_id,
-                session_id=session_id
+                session_id=session_id,
+                intent=intent,
+                explicit_project_id=project_id
             )
+            
+            if context.existing_project:
+                logger.info(
+                    "   ✅ Existing project loaded for context"
+                    "context.project.loaded",
+                    extra={
+                        "project_id": context.existing_project['project_id'],
+                        "confidence": context.existing_project.get('confidence', 0.0)
+                    }
+                )
+            elif intent.requires_context:
+                logger.warning(
+                    "   ⚠️ Existing project required but not found or confidence too low"
+                    "context.project.missing",
+                    extra={
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "message": "⚠️ Intent requires context but no valid project found.",
+                        "intent_type": intent.intent_type,
+                        "complexity": intent.complexity
+                    }
+                )
         
         # Load user preferences
         context.user_preferences = await self._load_user_preferences(user_id)
         
-        logger.info("✅ Context built successfully")
-        logger.info(f"   History messages: {len(context.conversation_history)}")
-        logger.info(f"   Has existing project: {context.existing_project is not None}")
-        logger.info(f"   User preferences: {len(context.user_preferences)} settings")
+        logger.info(
+            "✅ Context built successfully"
+            "context.build.completed",
+            extra={
+                "history_messages": len(context.conversation_history),
+                "has_project": context.existing_project is not None,
+                "preferences_loaded": len(context.user_preferences) > 0
+            }
+        )
         
         return context
     
@@ -100,82 +190,99 @@ class ContextBuilder:
         Returns:
             List of conversation messages
         """
-        logger.debug(f"Loading conversation history for {user_id}/{session_id}...")
+        logger.debug(
+                    "context.history.loading",
+                    extra={"user_id": user_id, "session_id": session_id}
+                )        
         
         try:
-            conversations = await db_manager.get_conversation_history(
-                user_id=user_id,
-                session_id=session_id,
-                limit=limit
-            )
+            # Case 1: Explicit project ID provided (highest priority)
+            if explicit_project_id:
+                project = await db_manager.get_project(explicit_project_id)
+                
+                if not project:
+                    logger.warning(
+                        "context.project.not_found",
+                        extra={"project_id": explicit_project_id}
+                    )
+                    return None
+                
+                # CRITICAL: Verify ownership
+                if project.get('user_id') != user_id:
+                    logger.error(
+                        "context.project.ownership_violation",
+                        extra={
+                            "project_id": explicit_project_id,
+                            "requested_by": user_id,
+                            "owned_by": project.get('user_id')
+                        }
+                    )
+                    return None  # Security violation - wrong user
+                
+                # Add confidence (explicit reference = 1.0)
+                project['_confidence'] = 1.0
+                project['_match_reason'] = 'explicit_project_id'
+                
+                logger.info(
+                    "context.project.loaded_explicit",
+                    extra={"project_id": explicit_project_id}
+                )
+                
+                return project
             
-            # Flatten messages from all conversations
-            all_messages = []
-            for conv in conversations:
-                messages = conv.get('messages', [])
-                if isinstance(messages, list):
-                    all_messages.extend(messages)
-            
-            # Sort by timestamp if available
-            all_messages.sort(
-                key=lambda m: m.get('timestamp', 0),
-                reverse=False  # Oldest first
-            )
-            
-            logger.debug(f"Loaded {len(all_messages)} messages from {len(conversations)} conversations")
-            return all_messages
-            
-        except Exception as e:
-            logger.warning(f"Failed to load conversation history: {e}")
-            return []
-    
-    async def _load_existing_project(
-        self,
-        user_id: str,
-        session_id: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Load the most recent project for this session.
-        
-        Args:
-            user_id: User identifier
-            session_id: Session identifier
-            
-        Returns:
-            Project data or None
-        """
-        logger.debug(f"Loading existing project for {user_id}/{session_id}...")
-        
-        try:
-            # Get user's recent projects
+            # Case 2: Match by session_id (medium priority)
             projects = await db_manager.get_user_projects(
                 user_id=user_id,
                 limit=5
             )
             
-            if not projects or len(projects) == 0:
-                logger.debug("No existing projects found")
+            if not projects:
+                logger.debug("context.project.none_found")
                 return None
             
-            # For now, return the most recent project
-            # In the future, we could match by session_id or project name
-            latest_project = projects[0]
+            # Find projects matching session
+            session_matches = []
             
-            project_data = {
-                'project_id': latest_project['id'],
-                'project_name': latest_project.get('project_name'),
-                'architecture': latest_project.get('architecture'),
-                'layout': latest_project.get('layout'),
-                'blockly': latest_project.get('blockly'),
-                'created_at': latest_project.get('created_at'),
-                'updated_at': latest_project.get('updated_at')
-            }
+            for project in projects:
+                # Calculate confidence
+                confidence = ContextRelevanceScore.calculate(
+                    project=project,
+                    user_id=user_id,
+                    session_id=session_id,
+                    intent=intent
+                )
+                
+                if confidence >= self.MIN_CONFIDENCE_THRESHOLD:
+                    project['_confidence'] = confidence
+                    project['_match_reason'] = 'session_match'
+                    session_matches.append(project)
             
-            logger.debug(f"Loaded project: {project_data['project_id']}")
-            return project_data
+            if not session_matches:
+                logger.warning(
+                    "context.project.no_confident_match",
+                    extra={
+                        "candidates": len(projects),
+                        "threshold": self.MIN_CONFIDENCE_THRESHOLD
+                    }
+                )
+                return None
+            
+            # Return highest confidence match
+            best_match = max(session_matches, key=lambda p: p['_confidence'])
+            
+            logger.info(
+                "context.project.loaded_session",
+                extra={
+                    "project_id": best_match['id'],
+                    "confidence": best_match['_confidence'],
+                    "candidates_evaluated": len(projects)
+                }
+            )
+            
+            return best_match
             
         except Exception as e:
-            logger.warning(f"Failed to load existing project: {e}")
+            logger.error(f"Failed to load existing project: {e}", exc_info=True)
             return None
     
     async def _load_user_preferences(self, user_id: str) -> Dict[str, Any]:
@@ -255,7 +362,12 @@ class ContextBuilder:
         # Existing project
         if context.existing_project:
             proj = context.existing_project
+            confidence = proj.get('_confidence', 0.0)
+            match_reason = proj.get('_match_reason', 'unknown')
+            
+            
             parts.append(f"**Existing Project:** {proj.get('project_name', 'Unnamed')}")
+            parts.append(f"  - Confidence: {confidence:.2f} (matched by {match_reason})")
             
             if proj.get('architecture'):
                 arch = proj['architecture']
