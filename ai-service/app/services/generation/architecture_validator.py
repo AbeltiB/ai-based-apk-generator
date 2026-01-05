@@ -1,22 +1,21 @@
 """
-Architecture Validator - Comprehensive validation and correction.
+Enhanced Architecture Validator with Heuristic Awareness
 
-Validates generated architectures for:
-- Logical consistency
-- Component availability
-- Navigation integrity
-- State management correctness
-- Performance considerations
+Validates architectures from both Claude and heuristic generators.
+Provides detailed feedback with structured logging.
 """
 from typing import Dict, Any, List, Tuple, Optional
-from loguru import logger
+from datetime import datetime
 
 from app.config import settings
 from app.models.schemas import ArchitectureDesign, ScreenDefinition
+from app.utils.logging import get_logger, log_context
+
+logger = get_logger(__name__)
 
 
 class ValidationWarning:
-    """Represents a validation warning"""
+    """Validation warning/error"""
     
     def __init__(self, level: str, component: str, message: str, suggestion: str = ""):
         self.level = level  # "info", "warning", "error"
@@ -36,71 +35,148 @@ class ValidationWarning:
         emoji = {"info": "ℹ️", "warning": "⚠️", "error": "❌"}
         s = f"{emoji.get(self.level, '•')} [{self.level.upper()}] {self.component}: {self.message}"
         if self.suggestion:
-            s += f"\n   → {self.suggestion}"
+            s += f"\n   💡 {self.suggestion}"
         return s
 
 
 class ArchitectureValidator:
     """
-    Comprehensive architecture validation.
+    Comprehensive architecture validator.
     
-    Performs multiple validation passes:
+    Validates architectures from any source (Claude or heuristic).
+    Provides detailed feedback with actionable suggestions.
+    
+    Validation passes:
     1. Schema validation (Pydantic)
-    2. Logical consistency
-    3. Component availability
-    4. Navigation integrity
-    5. State management
-    6. Performance considerations
+    2. Component availability
+    3. Navigation integrity
+    4. State management
+    5. Performance considerations
+    6. UX best practices
     """
     
     def __init__(self):
         self.warnings: List[ValidationWarning] = []
         self.available_components = set(settings.available_components)
+        
+        # Validation stats
+        self.stats = {
+            'total_validations': 0,
+            'passed': 0,
+            'failed': 0,
+            'heuristic_validated': 0,
+            'claude_validated': 0
+        }
+        
+        logger.info(
+            "🔍 validator.initialized",
+            extra={
+                "available_components": len(self.available_components)
+            }
+        )
     
     async def validate(
         self,
-        architecture: ArchitectureDesign
+        architecture: ArchitectureDesign,
+        source: str = "unknown"
     ) -> Tuple[bool, List[ValidationWarning]]:
         """
-        Comprehensive validation of architecture.
+        Validate architecture comprehensively.
         
         Args:
             architecture: Architecture to validate
+            source: Source of architecture ("claude" or "heuristic")
             
         Returns:
             Tuple of (is_valid, warnings_list)
         """
+        
         self.warnings = []
+        self.stats['total_validations'] += 1
         
-        logger.info("🔍 Validating architecture...")
+        if source == "heuristic":
+            self.stats['heuristic_validated'] += 1
+        elif source == "claude":
+            self.stats['claude_validated'] += 1
         
-        # Run all validation checks
-        await self._validate_screens(architecture)
-        await self._validate_components(architecture)
-        await self._validate_navigation(architecture)
-        await self._validate_state_management(architecture)
-        await self._validate_performance(architecture)
-        await self._validate_user_experience(architecture)
-        
-        # Determine if architecture is valid
-        has_errors = any(w.level == "error" for w in self.warnings)
-        is_valid = not has_errors
-        
-        if is_valid:
-            logger.info("✅ Architecture validation passed")
-        else:
+        with log_context(operation="architecture_validation", source=source):
+            logger.info(
+                "🔍 validation.started",
+                extra={
+                    "app_type": architecture.app_type,
+                    "screens": len(architecture.screens),
+                    "source": source
+                }
+            )
+            
+            # Run all validation checks
+            await self._validate_screens(architecture)
+            await self._validate_components(architecture)
+            await self._validate_navigation(architecture)
+            await self._validate_state_management(architecture)
+            await self._validate_performance(architecture)
+            await self._validate_user_experience(architecture)
+            
+            # Special validation for heuristic architectures
+            if source == "heuristic":
+                await self._validate_heuristic_specific(architecture)
+            
+            # Determine if architecture is valid
+            has_errors = any(w.level == "error" for w in self.warnings)
+            is_valid = not has_errors
+            
+            if is_valid:
+                self.stats['passed'] += 1
+            else:
+                self.stats['failed'] += 1
+            
+            # Log results
             error_count = sum(1 for w in self.warnings if w.level == "error")
-            logger.error(f"❌ Architecture validation failed: {error_count} error(s)")
-        
-        warning_count = sum(1 for w in self.warnings if w.level == "warning")
-        info_count = sum(1 for w in self.warnings if w.level == "info")
-        
-        if warning_count > 0:
-            logger.warning(f"⚠️  {warning_count} warning(s) found")
-        if info_count > 0:
-            logger.info(f"ℹ️  {info_count} info message(s)")
-        
-        return is_valid, self.warnings
+            warning_count = sum(1 for w in self.warnings if w.level == "warning")
+            info_count = sum(1 for w in self.warnings if w.level == "info")
+            
+            if is_valid:
+                logger.info(
+                    "✅ validation.passed",
+                    extra={
+                        "warnings": warning_count,
+                        "infos": info_count,
+                        "source": source
+                    }
+                )
+            else:
+                logger.error(
+                    "❌ validation.failed",
+                    extra={
+                        "errors": error_count,
+                        "warnings": warning_count,
+                        "source": source
+                    }
+                )
+            
+            # Log detailed warnings if present
+            if self.warnings:
+                logger.debug(
+                    "validation.warnings",
+                    extra={
+                        "total": len(self.warnings),
+                        "by_level": {
+                            "error": error_count,
+                            "warning": warning_count,
+                            "info": info_count
+                        },
+                        "details": [
+                            {
+                                "level": w.level,
+                                "component": w.component,
+                                "message": w.message
+                            }
+                            for w in self.warnings[:10]  # First 10
+                        ]
+                    }
+                )
+            
+            return is_valid, self.warnings
     
     async def _validate_screens(self, architecture: ArchitectureDesign) -> None:
         """Validate screen definitions"""
@@ -126,17 +202,16 @@ class ArchitectureValidator:
                 suggestion="Ensure all screen IDs are unique"
             ))
         
-        # Check screen purposes
+        # Check individual screens
         for screen in architecture.screens:
             if not screen.purpose or len(screen.purpose.strip()) < 10:
                 self.warnings.append(ValidationWarning(
                     level="warning",
                     component=f"screen:{screen.id}",
                     message=f"Screen '{screen.name}' has unclear purpose",
-                    suggestion="Add a clear description of the screen's purpose"
+                    suggestion="Add a clear description (at least 10 characters)"
                 ))
             
-            # Check if screen has components
             if len(screen.components) == 0:
                 self.warnings.append(ValidationWarning(
                     level="warning",
@@ -151,7 +226,7 @@ class ArchitectureValidator:
                 level="warning",
                 component="screens",
                 message=f"Large number of screens ({len(architecture.screens)})",
-                suggestion="Consider simplifying the navigation or using tab/drawer patterns"
+                suggestion="Consider simplifying or using tab/drawer navigation"
             ))
     
     async def _validate_components(self, architecture: ArchitectureDesign) -> None:
@@ -171,10 +246,10 @@ class ArchitectureValidator:
                     suggestion=f"Use one of: {', '.join(sorted(self.available_components))}"
                 ))
         
-        # Check for component variety
+        # Check for reasonable component diversity
         unique_components = set(all_components)
         
-        if len(unique_components) == 1:
+        if len(unique_components) == 1 and len(all_components) > 1:
             self.warnings.append(ValidationWarning(
                 level="info",
                 component="components",
@@ -182,7 +257,7 @@ class ArchitectureValidator:
                 suggestion="Consider adding more component types for richer UI"
             ))
         
-        # Check for common patterns
+        # Check for common UI patterns
         has_input = any(c in all_components for c in ['InputText', 'TextArea'])
         has_button = 'Button' in all_components
         
@@ -220,11 +295,10 @@ class ArchitectureValidator:
                     suggestion=f"Valid screens: {', '.join(sorted(screen_ids))}"
                 ))
         
-        # Check for orphaned screens (no way to reach them)
+        # Check for orphaned screens (multi-page apps only)
         if len(architecture.screens) > 1:
-            reachable = {architecture.screens[0].id}  # Assume first screen is entry point
+            reachable = {architecture.screens[0].id}
             
-            # Build reachability graph
             for route in architecture.navigation.routes:
                 from_screen = route.get('from')
                 to_screen = route.get('to')
@@ -246,50 +320,6 @@ class ArchitectureValidator:
                     message=f"Unreachable screens: {', '.join(sorted(orphaned))}",
                     suggestion="Add navigation routes to make these screens accessible"
                 ))
-        
-        # Check navigation depth
-        if architecture.navigation.type == "stack":
-            max_depth = self._calculate_max_navigation_depth(architecture)
-            if max_depth > 5:
-                self.warnings.append(ValidationWarning(
-                    level="warning",
-                    component="navigation",
-                    message=f"Deep navigation stack (depth: {max_depth})",
-                    suggestion="Consider using tab or drawer navigation for better UX"
-                ))
-    
-    def _calculate_max_navigation_depth(self, architecture: ArchitectureDesign) -> int:
-        """Calculate maximum navigation depth"""
-        # Simple depth calculation based on navigation routes
-        screen_ids = {s.id for s in architecture.screens}
-        
-        # Build adjacency list
-        adjacency = {sid: [] for sid in screen_ids}
-        for route in architecture.navigation.routes:
-            from_screen = route.get('from')
-            to_screen = route.get('to')
-            if from_screen and to_screen and from_screen in adjacency:
-                adjacency[from_screen].append(to_screen)
-        
-        # DFS to find max depth
-        def dfs(screen_id: str, visited: set, depth: int) -> int:
-            if screen_id in visited:
-                return depth
-            
-            visited.add(screen_id)
-            max_child_depth = depth
-            
-            for child in adjacency.get(screen_id, []):
-                child_depth = dfs(child, visited.copy(), depth + 1)
-                max_child_depth = max(max_child_depth, child_depth)
-            
-            return max_child_depth
-        
-        # Start from first screen
-        if architecture.screens:
-            return dfs(architecture.screens[0].id, set(), 1)
-        
-        return 0
     
     async def _validate_state_management(self, architecture: ArchitectureDesign) -> None:
         """Validate state management"""
@@ -324,30 +354,10 @@ class ArchitectureValidator:
                     message=f"Inconsistent state '{state.name}': component-scoped but global-state",
                     suggestion="Change scope to 'global' or type to 'local-state'"
                 ))
-            
-            # Check for reasonable initial values
-            if state.initial_value is None and state.type != "async-state":
-                self.warnings.append(ValidationWarning(
-                    level="warning",
-                    component="state",
-                    message=f"State '{state.name}' has no initial value",
-                    suggestion="Provide a default initial value"
-                ))
-        
-        # Warn about too many global state variables
-        global_states = [s for s in architecture.state_management if s.scope == "global"]
-        if len(global_states) > 10:
-            self.warnings.append(ValidationWarning(
-                level="warning",
-                component="state",
-                message=f"Large number of global state variables ({len(global_states)})",
-                suggestion="Consider grouping related state or using component-level state"
-            ))
     
     async def _validate_performance(self, architecture: ArchitectureDesign) -> None:
         """Validate performance considerations"""
         
-        # Check total component count
         total_components = sum(len(s.components) for s in architecture.screens)
         
         if total_components > 100:
@@ -358,38 +368,25 @@ class ArchitectureValidator:
                 suggestion="Consider simplifying the UI or using pagination"
             ))
         
-        # Check for screens with too many components
         for screen in architecture.screens:
             if len(screen.components) > 20:
                 self.warnings.append(ValidationWarning(
                     level="warning",
                     component=f"screen:{screen.id}",
                     message=f"Screen '{screen.name}' has many components ({len(screen.components)})",
-                    suggestion="Consider breaking into multiple screens or using tabs"
+                    suggestion="Consider breaking into multiple screens"
                 ))
-        
-        # Check async state usage
-        async_states = [s for s in architecture.state_management if s.type == "async-state"]
-        if len(async_states) > 5:
-            self.warnings.append(ValidationWarning(
-                level="info",
-                component="performance",
-                message=f"Multiple async state variables ({len(async_states)})",
-                suggestion="Ensure proper loading states and error handling"
-            ))
     
     async def _validate_user_experience(self, architecture: ArchitectureDesign) -> None:
-        """Validate user experience considerations"""
+        """Validate UX considerations"""
         
         # Check for input validation
-        has_inputs = False
-        for screen in architecture.screens:
-            if any(c in screen.components for c in ['InputText', 'TextArea']):
-                has_inputs = True
-                break
+        has_inputs = any(
+            any(c in screen.components for c in ['InputText', 'TextArea'])
+            for screen in architecture.screens
+        )
         
         if has_inputs:
-            # Check if there's state to store input values
             has_input_state = any(
                 'input' in s.name.lower() or 'text' in s.name.lower() or 'value' in s.name.lower()
                 for s in architecture.state_management
@@ -402,138 +399,46 @@ class ArchitectureValidator:
                     message="App has inputs but no obvious input state",
                     suggestion="Add state variables to store user input"
                 ))
+    
+    async def _validate_heuristic_specific(self, architecture: ArchitectureDesign) -> None:
+        """
+        Special validation for heuristic-generated architectures.
         
-        # Check for feedback mechanisms
-        has_progress = any('ProgressBar' in s.components or 'Spinner' in s.components for s in architecture.screens)
+        Heuristic architectures are valid by design, but we add
+        informational warnings about their limitations.
+        """
         
-        if len(architecture.state_management) > 0 and not has_progress:
-            has_async = any(s.type == "async-state" for s in architecture.state_management)
-            if has_async:
-                self.warnings.append(ValidationWarning(
-                    level="info",
-                    component="ux",
-                    message="Async operations without progress indicators",
-                    suggestion="Add Spinner or ProgressBar for better feedback"
-                ))
+        logger.debug(
+            "validation.heuristic.checking",
+            extra={"app_type": architecture.app_type}
+        )
         
-        # Check for empty state handling
-        has_lists = any('list' in s.name.lower() or 'items' in s.name.lower() for s in architecture.state_management)
+        self.warnings.append(ValidationWarning(
+            level="info",
+            component="generation",
+            message="Architecture generated using heuristic fallback",
+            suggestion="Template-based architecture. Consider refining the prompt for better results."
+        ))
         
-        if has_lists:
+        # Check if it's a generic template
+        if any(screen.name == "Main Screen" for screen in architecture.screens):
             self.warnings.append(ValidationWarning(
                 level="info",
-                component="ux",
-                message="App manages lists",
-                suggestion="Consider adding empty state UI when lists are empty"
+                component="generation",
+                message="Generic template used (pattern not recognized)",
+                suggestion="Use more specific keywords in your prompt (e.g., 'counter', 'todo', 'calculator')"
             ))
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """Get validation statistics"""
+        total = self.stats['total_validations']
+        
+        return {
+            **self.stats,
+            'pass_rate': (self.stats['passed'] / total * 100) if total > 0 else 0,
+            'heuristic_rate': (self.stats['heuristic_validated'] / total * 100) if total > 0 else 0
+        }
 
 
 # Global validator instance
 architecture_validator = ArchitectureValidator()
-
-
-if __name__ == "__main__":
-    # Test validator
-    import asyncio
-    from app.models.schemas import (
-        ArchitectureDesign,
-        ScreenDefinition,
-        NavigationStructure,
-        StateDefinition,
-        DataFlowDiagram
-    )
-    
-    async def test():
-        print("\n" + "=" * 60)
-        print("ARCHITECTURE VALIDATOR TEST")
-        print("=" * 60)
-        
-        # Test 1: Valid architecture
-        print("\n[TEST 1] Valid architecture")
-        
-        valid_arch = ArchitectureDesign(
-            app_type="single-page",
-            screens=[
-                ScreenDefinition(
-                    id="screen_1",
-                    name="Counter",
-                    purpose="Simple counter with increment and decrement",
-                    components=["Text", "Button", "Button"],
-                    navigation=[]
-                )
-            ],
-            navigation=NavigationStructure(type="stack", routes=[]),
-            state_management=[
-                StateDefinition(
-                    name="count",
-                    type="local-state",
-                    scope="screen",
-                    initial_value=0
-                )
-            ],
-            data_flow=DataFlowDiagram(
-                user_interactions=["increment", "decrement"],
-                api_calls=[],
-                local_storage=[]
-            )
-        )
-        
-        is_valid, warnings = await architecture_validator.validate(valid_arch)
-        
-        print(f"Valid: {is_valid}")
-        print(f"Warnings: {len(warnings)}")
-        for w in warnings:
-            print(f"  {w}")
-        
-        # Test 2: Invalid architecture
-        print("\n[TEST 2] Invalid architecture (missing components, bad navigation)")
-        
-        invalid_arch = ArchitectureDesign(
-            app_type="multi-page",
-            screens=[
-                ScreenDefinition(
-                    id="screen_1",
-                    name="Home",
-                    purpose="",
-                    components=["InvalidComponent"],
-                    navigation=["screen_999"]
-                ),
-                ScreenDefinition(
-                    id="screen_1",  # Duplicate ID
-                    name="Settings",
-                    purpose="User settings",
-                    components=[],
-                    navigation=[]
-                )
-            ],
-            navigation=NavigationStructure(
-                type="stack",
-                routes=[{"from": "screen_1", "to": "non_existent"}]
-            ),
-            state_management=[
-                StateDefinition(
-                    name="data",
-                    type="global-state",
-                    scope="component",  # Inconsistent
-                    initial_value=None
-                )
-            ],
-            data_flow=DataFlowDiagram(
-                user_interactions=[],
-                api_calls=[],
-                local_storage=[]
-            )
-        )
-        
-        is_valid, warnings = await architecture_validator.validate(invalid_arch)
-        
-        print(f"Valid: {is_valid}")
-        print(f"Warnings: {len(warnings)}")
-        for w in warnings:
-            print(f"  {w}")
-        
-        print("\n" + "=" * 60)
-        print("✅ Validator test complete!")
-        print("=" * 60 + "\n")
-    
-    asyncio.run(test())

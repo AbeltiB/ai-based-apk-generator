@@ -138,7 +138,7 @@ class IntentAnalysisResult(BaseModel):
     total_cost_usd: float = 0.0
     """Total estimated cost"""
     
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     """When classification occurred"""
     
     # ========================================================================

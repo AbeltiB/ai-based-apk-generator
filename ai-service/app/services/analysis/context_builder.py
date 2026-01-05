@@ -9,7 +9,7 @@ Loads and structures all relevant context for AI generation:
 """
 from typing import Dict, Any, List, Optional
 from loguru import logger
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.database import db_manager
 from app.models.enhanced_schemas import IntentAnalysis, EnrichedContext
@@ -117,7 +117,7 @@ class ContextBuilder:
             conversation_history=[],
             existing_project=None,
             user_preferences={},
-            timestamp=datetime.now(datetime.timezone.utc)
+            timestamp=datetime.now(timezone.utc)
         )
         
         # Load conversation history

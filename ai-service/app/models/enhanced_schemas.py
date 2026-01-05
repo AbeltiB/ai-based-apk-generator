@@ -465,7 +465,7 @@ class EnrichedContext(BaseModel):
     conversation_history: List[Dict[str, Any]] = Field(default_factory=list)
     existing_project: Optional[Dict[str, Any]] = None
     user_preferences: Dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 if __name__ == "__main__":

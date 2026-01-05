@@ -10,7 +10,7 @@ Defines all input/output schemas for:
 """
 from typing import List, Dict, Any, Optional, Literal
 from pydantic import BaseModel, Field, field_validator
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 
@@ -58,7 +58,7 @@ class AIRequest(BaseModel):
     context: Optional[PromptContext] = None
     """Optional context for the request"""
     
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     """When the request was created"""
     
     @field_validator('prompt')
