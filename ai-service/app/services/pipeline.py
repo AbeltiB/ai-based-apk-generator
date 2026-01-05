@@ -448,6 +448,13 @@ class LayoutGenerationStage(PipelineStage):
             from app.models.schemas import ArchitectureDesign
             arch_design = ArchitectureDesign(**architecture)
             
+            #Null safety check
+            if arch_design is None:
+                raise ValueError("Failed to parse architecture design]")
+            
+            #Parse layoutfrom 
+            from app.models.enhanced_schemas import EnhancedLayoutDefinition
+            
             # Generate layout for each screen
             layouts = {}
             all_warnings = []
@@ -682,7 +689,7 @@ class PublishingStage(PipelineStage):
             "task_id": context['task_id'],
             "socket_id": context['socket_id'],
             "type": "complete",
-            "status": "success" if not context['errors'] else "partial_success",
+            "status": "success" if not context.get('errors',[]) else "partial_success",
             "result": {
                 "architecture": context.get('architecture', {}),
                 "layout": context.get('layout', {}),

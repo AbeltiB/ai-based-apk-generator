@@ -11,7 +11,7 @@ from loguru import logger
 from app.services.analysis.intent_config import (config, ClassificationTier)
 from app.services.analysis.intent_schemas import (
     IntentAnalysisResult, ClassificationRequest,
-    ActionRecommendation, ClassificationCache
+    ClassificationCache
 )
 from app.services.analysis.tier_claude import ClaudeTier
 from app.services.analysis.tier_groq import GroqTier
