@@ -363,3 +363,47 @@ async def get_test_config():
             "responses": settings.rabbitmq_queue_ai_responses
         }
     }
+
+
+# New test endpoints for the API
+@router.get("/test/api/generate")
+async def test_api_generate_flow():
+    """Test the complete API flow"""
+    
+    return {
+        "test_cases": [
+            {
+                "method": "POST",
+                "endpoint": "/api/v1/generate",
+                "description": "Submit generation request",
+                "example_body": {
+                    "prompt": "Create a counter app with + and - buttons",
+                    "user_id": "test_user_123",
+                    "session_id": "test_session_456",
+                    "priority": 1
+                }
+            },
+            {
+                "method": "GET",
+                "endpoint": "/api/v1/task/{task_id}",
+                "description": "Check task status",
+                "example": "/api/v1/task/550e8400-e29b-41d4-a716-446655440000"
+            },
+            {
+                "method": "DELETE",
+                "endpoint": "/api/v1/task/{task_id}",
+                "description": "Cancel task",
+                "example": "/api/v1/task/550e8400-e29b-41d4-a716-446655440000"
+            },
+            {
+                "method": "GET",
+                "endpoint": "/api/v1/stats",
+                "description": "Get system statistics"
+            },
+            {
+                "method": "POST",
+                "endpoint": "/api/v1/test/prompt",
+                "description": "Test prompt (development only)"
+            }
+        ]
+    }

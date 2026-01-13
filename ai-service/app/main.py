@@ -21,6 +21,7 @@ from app.core.cache import cache_manager
 from app.core.database import db_manager
 from app.models.schemas import AIRequest
 from app.services.pipeline import default_pipeline
+from app.api.v1 import stats
 
 # Import new structured logging
 from app.utils.logging import get_logger, log_context
@@ -239,6 +240,21 @@ app.include_router(
     tags=["Generation"]
 )
 
+# Statistics endpoints
+app.include_router(
+    stats.router,
+    prefix="/api/v1",
+    tags=["Statistics"]
+)
+
+# Test routes (development only)
+if settings.debug:
+    from app.api.v1 import test_routes
+    app.include_router(
+        test_routes.router,
+        prefix="/api/v1",
+        tags=["Testing"]
+    )
 
 # ============================================================================
 # RABBITMQ CONSUMER
