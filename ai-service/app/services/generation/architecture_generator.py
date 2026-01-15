@@ -1,12 +1,6 @@
 """
-Enhanced Architecture Generator with Heuristic Fallback
-
-Improvements:
-1. ✅ Async Anthropic client wrapper for non-blocking operations
-2. ✅ Heuristic fallback integration with automatic triggering
-3. ✅ Enhanced error handling with detailed logging
-4. ✅ Schema validation alignment between Claude and heuristic
-5. ✅ Performance tracking and metrics
+Enhanced Architecture Generator - Phase 3
+Uses LLM Orchestrator (Llama3 → Heuristic fallback)
 """
 import json
 import asyncio
@@ -19,7 +13,8 @@ from app.models.enhanced_schemas import EnrichedContext
 from app.models.prompts import prompts
 from app.services.generation.architecture_validator import architecture_validator
 from app.services.generation.heuristic_generator import heuristic_architecture_generator
-from app.core.async_anthropic_client import get_async_client
+from app.llm.orchestrator import LLMOrchestrator
+from app.llm.base import LLMMessage, LLMProvider
 from app.utils.logging import get_logger, log_context, trace_async
 
 logger = get_logger(__name__)
@@ -37,27 +32,34 @@ class InvalidArchitectureError(ArchitectureGenerationError):
 
 class ArchitectureGenerator:
     """
-    Enhanced Architecture Generator with multi-tier fallback.
+    Phase 3 Architecture Generator using LLM Orchestrator.
     
     Generation Flow:
-    1. 🎯 Try Claude API (primary)
-    2. 🔄 Retry with corrections if needed
+    1. 🎯 Try Llama3 via orchestrator (primary)
+    2. 🔄 Retry with corrections if needed (up to max_retries)
     3. 🛡️ Fall back to heuristic if all retries fail
     4. ✅ Validate final result
     
     Features:
-    - Non-blocking async operations
+    - Llama3 as primary LLM
     - Automatic heuristic fallback
     - Comprehensive error handling
     - Performance monitoring
     - Detailed structured logging
     """
     
-    def __init__(self):
-        self.client = get_async_client()
-        self.model = settings.anthropic_model
-        self.max_tokens = settings.anthropic_max_tokens
-        self.temperature = settings.anthropic_temperature
+    def __init__(self, orchestrator: Optional[LLMOrchestrator] = None):
+        # Initialize LLM orchestrator
+        if orchestrator:
+            self.orchestrator = orchestrator
+        else:
+            config = {
+                "failure_threshold": 3,
+                "failure_window_minutes": 5,
+                "llama3_api_url": settings.llama3_api_url,
+                "llama3_api_key": settings.llama3_api_key
+            }
+            self.orchestrator = LLMOrchestrator(config)
         
         # Retry configuration
         self.max_retries = 3
@@ -71,13 +73,13 @@ class ArchitectureGenerator:
             'retries': 0,
             'corrections': 0,
             'heuristic_fallbacks': 0,
-            'claude_successes': 0
+            'llama3_successes': 0
         }
         
         logger.info(
             "architecture.generator.initialized",
             extra={
-                "model": self.model,
+                "llm_provider": "llama3",
                 "max_retries": self.max_retries,
                 "heuristic_fallback_enabled": True
             }
@@ -93,7 +95,7 @@ class ArchitectureGenerator:
         Generate architecture with automatic fallback.
         
         Flow:
-        1. Try Claude API with retries
+        1. Try Llama3 via orchestrator with retries
         2. On failure, fall back to heuristic
         3. Validate result
         4. Return architecture + metadata
@@ -106,13 +108,13 @@ class ArchitectureGenerator:
             Tuple of (ArchitectureDesign, metadata)
             
         Raises:
-            ArchitectureGenerationError: Only if both Claude and heuristic fail
+            ArchitectureGenerationError: Only if both Llama3 and heuristic fail
         """
         self.stats['total_requests'] += 1
         
         with log_context(operation="architecture_generation"):
             logger.info(
-                "🏗️ architecture.generation.started",
+                "🗺️ architecture.generation.started",
                 extra={
                     "prompt_length": len(prompt),
                     "has_context": context is not None,
@@ -132,32 +134,33 @@ class ArchitectureGenerator:
                 }
             )
             
-            # Try Claude first
+            # Try LLM (Llama3) first
             architecture = None
             metadata = {}
             used_heuristic = False
             
             try:
-                architecture, metadata = await self._generate_with_claude(
+                architecture, metadata = await self._generate_with_llm(
                     prompt=prompt,
                     context=context,
                     mode=generation_mode
                 )
                 
-                self.stats['claude_successes'] += 1
+                self.stats['llama3_successes'] += 1
                 logger.info(
-                    "✅ architecture.claude.success",
+                    "✅ architecture.llm.success",
                     extra={
                         "app_type": architecture.app_type,
-                        "screens": len(architecture.screens)
+                        "screens": len(architecture.screens),
+                        "provider": metadata.get('provider', 'llama3')
                     }
                 )
                 
-            except Exception as claude_error:
+            except Exception as llm_error:
                 logger.warning(
-                    "⚠️ architecture.claude.failed",
-                    extra={"error": str(claude_error)},
-                    exc_info=claude_error
+                    "⚠️ architecture.llm.failed",
+                    extra={"error": str(llm_error)},
+                    exc_info=llm_error
                 )
                 
                 # Fall back to heuristic
@@ -167,8 +170,8 @@ class ArchitectureGenerator:
                     architecture = await self._generate_with_heuristic(prompt)
                     metadata = {
                         'generation_method': 'heuristic',
-                        'fallback_reason': str(claude_error),
-                        'model': 'heuristic',
+                        'fallback_reason': str(llm_error),
+                        'provider': 'heuristic',
                         'tokens_used': 0,
                         'api_duration_ms': 0
                     }
@@ -180,7 +183,7 @@ class ArchitectureGenerator:
                         "✅ architecture.heuristic.success",
                         extra={
                             "app_type": architecture.app_type,
-                            "fallback_reason": str(claude_error)[:100]
+                            "fallback_reason": str(llm_error)[:100]
                         }
                     )
                     
@@ -193,15 +196,18 @@ class ArchitectureGenerator:
                     
                     self.stats['failed'] += 1
                     raise ArchitectureGenerationError(
-                        f"Both Claude and heuristic generation failed. "
-                        f"Claude: {claude_error}, Heuristic: {heuristic_error}"
+                        f"Both LLM and heuristic generation failed. "
+                        f"LLM: {llm_error}, Heuristic: {heuristic_error}"
                     )
             
             # Validate architecture
             logger.info("🔍 architecture.validation.starting")
             
             try:
-                is_valid, warnings = await architecture_validator.validate(architecture)
+                is_valid, warnings = await architecture_validator.validate(
+                    architecture,
+                    source="heuristic" if used_heuristic else "llama3"
+                )
                 
                 error_count = sum(1 for w in warnings if w.level == "error")
                 warning_count = sum(1 for w in warnings if w.level == "warning")
@@ -275,33 +281,30 @@ class ArchitectureGenerator:
     
     def _determine_generation_mode(self, intent_type: str) -> str:
         """Determine which generation mode to use"""
-        
         mode_map = {
             "new_app": "new",
             "extend_app": "extend",
             "modify_app": "modify"
         }
-        
         return mode_map.get(intent_type, "new")
     
-    async def _generate_with_claude(
+    async def _generate_with_llm(
         self,
         prompt: str,
         context: Optional[EnrichedContext],
         mode: str
     ) -> Tuple[ArchitectureDesign, Dict[str, Any]]:
         """
-        Generate architecture using Claude API with retries.
+        Generate architecture using LLM orchestrator with retries.
         
         Implements exponential backoff and automatic error correction.
         """
-        
         last_error = None
         
         for attempt in range(1, self.max_retries + 1):
             try:
                 logger.debug(
-                    f"🔄 architecture.claude.attempt",
+                    f"🔄 architecture.llm.attempt",
                     extra={
                         "attempt": attempt,
                         "max_retries": self.max_retries,
@@ -323,7 +326,7 @@ class ArchitectureGenerator:
                 self.stats['retries'] += 1
                 
                 logger.warning(
-                    f"⚠️ architecture.claude.retry",
+                    f"⚠️ architecture.llm.retry",
                     extra={
                         "attempt": attempt,
                         "error": str(e)[:200],
@@ -336,7 +339,7 @@ class ArchitectureGenerator:
                     await asyncio.sleep(delay)
                 else:
                     logger.error(
-                        "❌ architecture.claude.exhausted",
+                        "❌ architecture.llm.exhausted",
                         extra={
                             "total_attempts": attempt,
                             "final_error": str(last_error)
@@ -351,7 +354,7 @@ class ArchitectureGenerator:
         prompt: str,
         context: Optional[EnrichedContext]
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """Generate new app architecture using Claude"""
+        """Generate new app architecture using LLM orchestrator"""
         
         logger.debug("🆕 architecture.new.generating")
         
@@ -370,38 +373,40 @@ class ArchitectureGenerator:
             context_section=context_section
         )
         
-        # Call Claude API
+        # Create messages for orchestrator
+        messages = [
+            LLMMessage(role="system", content=system_prompt),
+            LLMMessage(role="user", content=user_prompt)
+        ]
+        
+        # Call LLM via orchestrator
         start_time = asyncio.get_event_loop().time()
         
-        response = await self.client.create_message(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            messages=[{"role": "user", "content": user_prompt}],
-            system=system_prompt,
-            temperature=self.temperature
+        response = await self.orchestrator.generate(
+            messages=messages,
+            temperature=0.7,
+            max_tokens=4096
         )
         
         api_duration = int((asyncio.get_event_loop().time() - start_time) * 1000)
         
-        # Extract response
-        response_text = response.content[0].text.strip()
-        
         logger.debug(
-            "architecture.claude.response_received",
+            "architecture.llm.response_received",
             extra={
-                "response_length": len(response_text),
-                "api_duration_ms": api_duration
+                "response_length": len(response.content),
+                "api_duration_ms": api_duration,
+                "provider": response.provider.value
             }
         )
         
         # Parse JSON
-        architecture_data = await self._parse_architecture_json(response_text)
+        architecture_data = await self._parse_architecture_json(response.content)
         
         # Build metadata
         metadata = {
-            'generation_method': 'claude',
-            'model': self.model,
-            'tokens_used': response.usage.input_tokens + response.usage.output_tokens,
+            'generation_method': 'llm',
+            'provider': response.provider.value,
+            'tokens_used': response.tokens_used,
             'api_duration_ms': api_duration,
             'generation_mode': 'new_app',
             'retries': 0
@@ -442,28 +447,31 @@ class ArchitectureGenerator:
             prompt=prompt
         )
         
-        # Call Claude API
+        # Create messages
+        messages = [
+            LLMMessage(role="system", content=system_prompt),
+            LLMMessage(role="user", content=user_prompt)
+        ]
+        
+        # Call LLM via orchestrator
         start_time = asyncio.get_event_loop().time()
         
-        response = await self.client.create_message(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            messages=[{"role": "user", "content": user_prompt}],
-            system=system_prompt,
-            temperature=self.temperature
+        response = await self.orchestrator.generate(
+            messages=messages,
+            temperature=0.7,
+            max_tokens=4096
         )
         
         api_duration = int((asyncio.get_event_loop().time() - start_time) * 1000)
         
         # Extract and parse response
-        response_text = response.content[0].text.strip()
-        architecture_data = await self._parse_architecture_json(response_text)
+        architecture_data = await self._parse_architecture_json(response.content)
         
         # Build metadata
         metadata = {
-            'generation_method': 'claude',
-            'model': self.model,
-            'tokens_used': response.usage.input_tokens + response.usage.output_tokens,
+            'generation_method': 'llm',
+            'provider': response.provider.value,
+            'tokens_used': response.tokens_used,
             'api_duration_ms': api_duration,
             'generation_mode': 'extend_app',
             'retries': 0,
@@ -514,7 +522,7 @@ class ArchitectureGenerator:
     
     async def _parse_architecture_json(self, response_text: str) -> Dict[str, Any]:
         """
-        Parse architecture JSON from Claude response with auto-correction.
+        Parse architecture JSON from LLM response with auto-correction.
         """
         
         # Remove markdown code blocks
@@ -588,7 +596,7 @@ class ArchitectureGenerator:
             **self.stats,
             'success_rate': (self.stats['successful'] / total * 100) if total > 0 else 0,
             'heuristic_fallback_rate': (self.stats['heuristic_fallbacks'] / total * 100) if total > 0 else 0,
-            'claude_success_rate': (self.stats['claude_successes'] / total * 100) if total > 0 else 0
+            'llama3_success_rate': (self.stats['llama3_successes'] / total * 100) if total > 0 else 0
         }
 
 

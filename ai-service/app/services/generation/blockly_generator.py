@@ -1,19 +1,22 @@
 """
-Blockly Generator - Visual programming block generation.
-
-Generates Blockly blocks for app logic from architecture and layout.
-Phase 5 implementation with event handlers, state management, and logic flows.
+Blockly Generator - Phase 3
+Uses LLM Orchestrator (Llama3 → Heuristic fallback)
 """
 import json
 import asyncio
 from typing import Dict, Any, List, Optional, Tuple
-from loguru import logger
-import anthropic
+from datetime import datetime
 
 from app.config import settings
 from app.models.schemas import ArchitectureDesign
 from app.models.enhanced_schemas import EnhancedLayoutDefinition
 from app.models.prompts import prompts
+from app.services.generation.blockly_validator import blockly_validator
+from app.llm.orchestrator import LLMOrchestrator
+from app.llm.base import LLMMessage
+from app.utils.logging import get_logger, log_context, trace_async
+
+logger = get_logger(__name__)
 
 
 class BlocklyGenerationError(Exception):
@@ -23,23 +26,40 @@ class BlocklyGenerationError(Exception):
 
 class BlocklyGenerator:
     """
-    Generates Blockly visual programming blocks using Claude API.
+    Phase 3 Blockly Generator using LLM Orchestrator.
+    
+    Generation Flow:
+    1. 🎯 Try Llama3 via orchestrator
+    2. 🔄 Retry with corrections if needed
+    3. 🛡️ Fall back to heuristic if all retries fail
+    4. ✅ Validate block structure
     
     Features:
-    - Event block generation (onClick, onChange, etc.)
-    - Action block creation (setState, navigation)
-    - Logic blocks (if/else, loops)
-    - Math operations (arithmetic, comparisons)
-    - Variable management
-    - Block connection validation
+    - Llama3 as primary LLM
+    - Automatic heuristic template fallback
+    - Block validation
+    - Variable extraction
     """
     
-    def __init__(self):
-        self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        self.model = settings.anthropic_model
+    def __init__(self, orchestrator: Optional[LLMOrchestrator] = None):
+        # Initialize LLM orchestrator
+        if orchestrator:
+            self.orchestrator = orchestrator
+        else:
+            config = {
+                "failure_threshold": 3,
+                "failure_window_minutes": 5,
+                "llama3_api_url": settings.llama3_api_url,
+                "llama3_api_key": settings.llama3_api_key
+            }
+            self.orchestrator = LLMOrchestrator(config)
         
         # Block ID counter
         self.block_id_counter = 0
+        
+        # Retry configuration
+        self.max_retries = 3
+        self.retry_delay = 2
         
         # Statistics
         self.stats = {
@@ -47,9 +67,20 @@ class BlocklyGenerator:
             'successful': 0,
             'failed': 0,
             'blocks_generated': 0,
-            'variables_created': 0
+            'variables_created': 0,
+            'heuristic_fallbacks': 0,
+            'llama3_successes': 0
         }
+        
+        logger.info(
+            "blockly.generator.initialized",
+            extra={
+                "llm_provider": "llama3",
+                "heuristic_fallback_enabled": True
+            }
+        )
     
+    @trace_async("blockly.generation")
     async def generate(
         self,
         architecture: ArchitectureDesign,
@@ -71,14 +102,75 @@ class BlocklyGenerator:
         self.stats['total_requests'] += 1
         self.block_id_counter = 0
         
-        logger.info("🧩 Generating Blockly blocks...")
-        
-        try:
-            # Generate blocks with Claude
-            blockly_data, metadata = await self._generate_with_claude(
-                architecture=architecture,
-                layouts=layouts
+        with log_context(operation="blockly_generation"):
+            logger.info(
+                "🧩 blockly.generation.started",
+                extra={"screens": len(layouts)}
             )
+            
+            # Try LLM first
+            blockly_data = None
+            metadata = {}
+            used_heuristic = False
+            
+            try:
+                blockly_data, metadata = await self._generate_with_llm(
+                    architecture=architecture,
+                    layouts=layouts
+                )
+                
+                self.stats['llama3_successes'] += 1
+                logger.info(
+                    "✅ blockly.llm.success",
+                    extra={
+                        "blocks": len(blockly_data.get('blocks', {}).get('blocks', [])),
+                        "provider": metadata.get('provider', 'llama3')
+                    }
+                )
+                
+            except Exception as llm_error:
+                logger.warning(
+                    "⚠️ blockly.llm.failed",
+                    extra={"error": str(llm_error)},
+                    exc_info=llm_error
+                )
+                
+                # Fall back to heuristic
+                logger.info("🛡️ blockly.fallback.initiating")
+                
+                try:
+                    blockly_data = await self._generate_heuristic_blocks(
+                        architecture=architecture,
+                        layouts=layouts
+                    )
+                    metadata = {
+                        'generation_method': 'heuristic',
+                        'fallback_reason': str(llm_error),
+                        'provider': 'heuristic',
+                        'tokens_used': 0,
+                        'api_duration_ms': 0
+                    }
+                    
+                    used_heuristic = True
+                    self.stats['heuristic_fallbacks'] += 1
+                    
+                    logger.info(
+                        "✅ blockly.heuristic.success",
+                        extra={"blocks": len(blockly_data.get('blocks', {}).get('blocks', []))}
+                    )
+                    
+                except Exception as heuristic_error:
+                    logger.error(
+                        "❌ blockly.heuristic.failed",
+                        extra={"error": str(heuristic_error)},
+                        exc_info=heuristic_error
+                    )
+                    
+                    self.stats['failed'] += 1
+                    raise BlocklyGenerationError(
+                        f"Both LLM and heuristic generation failed. "
+                        f"LLM: {llm_error}, Heuristic: {heuristic_error}"
+                    )
             
             # Validate block structure
             validated = await self._validate_blocks(blockly_data)
@@ -86,99 +178,163 @@ class BlocklyGenerator:
             # Add custom block definitions
             validated['custom_blocks'] = self._generate_custom_blocks(architecture)
             
+            # Validate with validator
+            logger.info("🔍 blockly.validation.starting")
+            
+            try:
+                is_valid, warnings = await blockly_validator.validate(validated)
+                
+                error_count = sum(1 for w in warnings if w.level == "error")
+                warning_count = sum(1 for w in warnings if w.level == "warning")
+                
+                if not is_valid:
+                    logger.warning(
+                        "⚠️ blockly.validation.issues",
+                        extra={
+                            "errors": error_count,
+                            "warnings": warning_count
+                        }
+                    )
+                
+                logger.info(
+                    "✅ blockly.validation.completed",
+                    extra={"warnings": warning_count}
+                )
+                
+            except Exception as validation_error:
+                logger.warning(
+                    "⚠️ blockly.validation.error",
+                    extra={"error": str(validation_error)}
+                )
+            
+            # Update metadata
+            metadata.update({
+                'used_heuristic': used_heuristic,
+                'generated_at': datetime.utcnow().isoformat() + "Z"
+            })
+            
             self.stats['successful'] += 1
             self.stats['blocks_generated'] = len(validated['blocks']['blocks'])
             self.stats['variables_created'] = len(validated['variables'])
             
-            logger.info(f"✅ Blockly generated: {self.stats['blocks_generated']} blocks")
+            logger.info(
+                "🎉 blockly.generation.completed",
+                extra={
+                    "blocks": self.stats['blocks_generated'],
+                    "variables": self.stats['variables_created'],
+                    "used_heuristic": used_heuristic
+                }
+            )
             
             return validated, metadata
-            
-        except Exception as e:
-            self.stats['failed'] += 1
-            logger.error(f"Blockly generation failed: {e}")
-            raise BlocklyGenerationError(f"Failed to generate Blockly: {e}")
     
-    async def _generate_with_claude(
+    async def _generate_with_llm(
         self,
         architecture: ArchitectureDesign,
         layouts: Dict[str, EnhancedLayoutDefinition]
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """
-        Generate Blockly blocks using Claude API.
+        """Generate Blockly blocks using LLM orchestrator with retries"""
         
-        Args:
-            architecture: Architecture design
-            layouts: Layout definitions
-            
-        Returns:
-            Tuple of (blockly_dict, metadata)
-        """
-        logger.debug("Calling Claude API for Blockly generation...")
+        last_error = None
         
-        # Extract component events
-        component_events = self._extract_component_events(layouts)
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                logger.debug(
+                    f"🔄 blockly.llm.attempt",
+                    extra={"attempt": attempt}
+                )
+                
+                # Extract component events
+                component_events = self._extract_component_events(layouts)
+                
+                # Format prompt
+                system_prompt, user_prompt = prompts.BLOCKLY_GENERATE.format(
+                    architecture=json.dumps(architecture.dict(), indent=2),
+                    layout=json.dumps(
+                        {k: v.dict() for k, v in layouts.items()} if len(layouts) > 1 
+                        else list(layouts.values())[0].dict(),
+                        indent=2
+                    ),
+                    component_events=json.dumps(component_events, indent=2)
+                )
+                
+                # Create messages
+                messages = [
+                    LLMMessage(role="system", content=system_prompt),
+                    LLMMessage(role="user", content=user_prompt)
+                ]
+                
+                # Call LLM via orchestrator
+                start_time = asyncio.get_event_loop().time()
+                
+                response = await self.orchestrator.generate(
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=4096
+                )
+                
+                api_duration = int((asyncio.get_event_loop().time() - start_time) * 1000)
+                
+                logger.debug(
+                    "blockly.llm.response_received",
+                    extra={
+                        "response_length": len(response.content),
+                        "api_duration_ms": api_duration,
+                        "provider": response.provider.value
+                    }
+                )
+                
+                # Parse response
+                blockly_data = await self._parse_blockly_json(response.content)
+                
+                # Build metadata
+                metadata = {
+                    'generation_method': 'llm',
+                    'provider': response.provider.value,
+                    'tokens_used': response.tokens_used,
+                    'api_duration_ms': api_duration,
+                    'screens': list(layouts.keys())
+                }
+                
+                return blockly_data, metadata
+                
+            except Exception as e:
+                last_error = e
+                
+                logger.warning(
+                    f"⚠️ blockly.llm.retry",
+                    extra={
+                        "attempt": attempt,
+                        "error": str(e)[:200],
+                        "will_retry": attempt < self.max_retries
+                    }
+                )
+                
+                if attempt < self.max_retries:
+                    delay = self.retry_delay * (2 ** (attempt - 1))
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(
+                        "❌ blockly.llm.exhausted",
+                        extra={
+                            "total_attempts": attempt,
+                            "final_error": str(last_error)
+                        }
+                    )
+                    raise last_error
         
-        # Format prompt
-        system_prompt, user_prompt = prompts.BLOCKLY_GENERATE.format(
-            architecture=json.dumps(architecture.dict(), indent=2),
-            layout=json.dumps(
-                {k: v.dict() for k, v in layouts.items()} if len(layouts) > 1 
-                else list(layouts.values())[0].dict(),
-                indent=2
-            ),
-            component_events=json.dumps(component_events, indent=2)
-        )
-        
-        # Call Claude API
-        start_time = asyncio.get_event_loop().time()
-        
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=settings.anthropic_max_tokens,
-            temperature=settings.anthropic_temperature,
-            system=system_prompt,
-            messages=[
-                {"role": "user", "content": user_prompt}
-            ]
-        )
-        
-        api_duration = int((asyncio.get_event_loop().time() - start_time) * 1000)
-        
-        # Parse response
-        response_text = response.content[0].text.strip()
-        blockly_data = await self._parse_blockly_json(response_text)
-        
-        # Build metadata
-        metadata = {
-            'model': self.model,
-            'tokens_used': response.usage.input_tokens + response.usage.output_tokens,
-            'api_duration_ms': api_duration,
-            'screens': list(layouts.keys())
-        }
-        
-        return blockly_data, metadata
+        raise last_error or BlocklyGenerationError("All retries failed")
     
     def _extract_component_events(
         self,
         layouts: Dict[str, EnhancedLayoutDefinition]
     ) -> Dict[str, List[str]]:
-        """
-        Extract events from components in layouts.
-        
-        Args:
-            layouts: Layout definitions
-            
-        Returns:
-            Map of component_id -> list of event types
-        """
+        """Extract events from components in layouts"""
         events = {}
         
         for screen_id, layout in layouts.items():
             for component in layout.components:
                 comp_events = []
-                
-                # Check component type for default events
                 comp_type = component.component_type
                 
                 if comp_type == 'Button':
@@ -202,15 +358,8 @@ class BlocklyGenerator:
         return events
     
     async def _parse_blockly_json(self, response_text: str) -> Dict[str, Any]:
-        """
-        Parse Blockly JSON from Claude response.
+        """Parse Blockly JSON from LLM response"""
         
-        Args:
-            response_text: Raw response from Claude
-            
-        Returns:
-            Parsed Blockly dictionary
-        """
         # Remove markdown code blocks
         if response_text.startswith("```"):
             parts = response_text.split("```")
@@ -224,9 +373,8 @@ class BlocklyGenerator:
         try:
             data = json.loads(response_text)
             
-            # Ensure it's a list of block definitions
+            # Ensure it's in the right format
             if isinstance(data, list):
-                # Convert to expected format
                 return {
                     'blocks': {
                         'languageVersion': 0,
@@ -235,11 +383,9 @@ class BlocklyGenerator:
                     'variables': []
                 }
             elif isinstance(data, dict):
-                # Check if it's already in the right format
                 if 'blocks' in data:
                     return data
                 else:
-                    # Assume it's a workspace
                     return {
                         'blocks': data if 'blocks' in data else {'languageVersion': 0, 'blocks': []},
                         'variables': data.get('variables', [])
@@ -251,16 +397,53 @@ class BlocklyGenerator:
             logger.error(f"JSON parse error: {e}")
             raise BlocklyGenerationError(f"Could not parse Blockly JSON: {e}")
     
-    async def _validate_blocks(self, blockly_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Validate Blockly block structure.
+    async def _generate_heuristic_blocks(
+        self,
+        architecture: ArchitectureDesign,
+        layouts: Dict[str, EnhancedLayoutDefinition]
+    ) -> Dict[str, Any]:
+        """Generate basic Blockly blocks using heuristic templates"""
         
-        Args:
-            blockly_data: Raw Blockly data
-            
-        Returns:
-            Validated Blockly data
-        """
+        logger.info("🛡️ blockly.heuristic.generating")
+        
+        blocks = []
+        variables = []
+        
+        # Extract state variables
+        for state in architecture.state_management:
+            variables.append({
+                'name': state.name,
+                'id': self._generate_block_id(),
+                'type': ''
+            })
+        
+        # Generate basic event blocks for buttons
+        for screen_id, layout in layouts.items():
+            for component in layout.components:
+                if component.component_type == 'Button':
+                    # Create button click event
+                    block = {
+                        'type': 'component_event',
+                        'id': self._generate_block_id(),
+                        'fields': {
+                            'COMPONENT': component.component_id,
+                            'EVENT': 'onPress'
+                        },
+                        'next': None
+                    }
+                    blocks.append(block)
+        
+        return {
+            'blocks': {
+                'languageVersion': 0,
+                'blocks': blocks
+            },
+            'variables': variables
+        }
+    
+    async def _validate_blocks(self, blockly_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate Blockly block structure"""
+        
         logger.debug("Validating Blockly blocks...")
         
         # Ensure required structure
@@ -293,8 +476,6 @@ class BlocklyGenerator:
         var_names = set()
         
         def extract_from_block(block: Dict[str, Any]):
-            """Recursively extract variables"""
-            # Check fields for variable references
             fields = block.get('fields', {})
             for field_name, field_value in fields.items():
                 if field_name == 'VAR' or field_name == 'VARIABLE':
@@ -306,13 +487,11 @@ class BlocklyGenerator:
                             'type': ''
                         })
             
-            # Check nested blocks
             inputs = block.get('inputs', {})
             for input_data in inputs.values():
                 if isinstance(input_data, dict) and 'block' in input_data:
                     extract_from_block(input_data['block'])
             
-            # Check next block
             if 'next' in block and isinstance(block['next'], dict):
                 if 'block' in block['next']:
                     extract_from_block(block['next']['block'])
@@ -323,15 +502,7 @@ class BlocklyGenerator:
         return variables
     
     def _generate_custom_blocks(self, architecture: ArchitectureDesign) -> List[Dict[str, Any]]:
-        """
-        Generate custom block type definitions.
-        
-        Args:
-            architecture: Architecture design
-            
-        Returns:
-            List of custom block definitions
-        """
+        """Generate custom block type definitions"""
         custom_blocks = []
         
         # Component action blocks
@@ -389,143 +560,12 @@ class BlocklyGenerator:
         total = self.stats['total_requests']
         
         return {
-            'total_requests': total,
-            'successful': self.stats['successful'],
-            'failed': self.stats['failed'],
+            **self.stats,
             'success_rate': (self.stats['successful'] / total * 100) if total > 0 else 0,
-            'blocks_generated': self.stats['blocks_generated'],
-            'variables_created': self.stats['variables_created']
+            'heuristic_fallback_rate': (self.stats['heuristic_fallbacks'] / total * 100) if total > 0 else 0,
+            'llama3_success_rate': (self.stats['llama3_successes'] / total * 100) if total > 0 else 0
         }
 
 
 # Global Blockly generator instance
 blockly_generator = BlocklyGenerator()
-
-
-if __name__ == "__main__":
-    # Test Blockly generator
-    import asyncio
-    from app.models.schemas import (
-        ArchitectureDesign,
-        ScreenDefinition,
-        NavigationStructure,
-        StateDefinition,
-        DataFlowDiagram
-    )
-    from app.models.enhanced_schemas import (
-        EnhancedLayoutDefinition,
-        EnhancedComponentDefinition,
-        PropertyValue
-    )
-    
-    async def test():
-        print("\n" + "=" * 60)
-        print("BLOCKLY GENERATOR TEST")
-        print("=" * 60)
-        
-        # Create test architecture
-        architecture = ArchitectureDesign(
-            app_type="single-page",
-            screens=[
-                ScreenDefinition(
-                    id="screen_1",
-                    name="Counter",
-                    purpose="Simple counter with increment and decrement",
-                    components=["Text", "Button", "Button"],
-                    navigation=[]
-                )
-            ],
-            navigation=NavigationStructure(type="stack", routes=[]),
-            state_management=[
-                StateDefinition(
-                    name="count",
-                    type="local-state",
-                    scope="screen",
-                    initial_value=0
-                )
-            ],
-            data_flow=DataFlowDiagram(
-                user_interactions=["increment", "decrement"],
-                api_calls=[],
-                local_storage=[]
-            )
-        )
-        
-        # Create test layout
-        layout = EnhancedLayoutDefinition(
-            screen_id="screen_1",
-            components=[
-                EnhancedComponentDefinition(
-                    component_id="text_count",
-                    component_type="Text",
-                    properties={
-                        "value": PropertyValue(type="variable", value="count"),
-                        "style": PropertyValue(type="literal", value={
-                            "left": 97, "top": 100, "width": 180, "height": 40
-                        })
-                    }
-                ),
-                EnhancedComponentDefinition(
-                    component_id="btn_increment",
-                    component_type="Button",
-                    properties={
-                        "value": PropertyValue(type="literal", value="+"),
-                        "style": PropertyValue(type="literal", value={
-                            "left": 50, "top": 160, "width": 120, "height": 44
-                        })
-                    }
-                ),
-                EnhancedComponentDefinition(
-                    component_id="btn_decrement",
-                    component_type="Button",
-                    properties={
-                        "value": PropertyValue(type="literal", value="-"),
-                        "style": PropertyValue(type="literal", value={
-                            "left": 200, "top": 160, "width": 120, "height": 44
-                        })
-                    }
-                )
-            ]
-        )
-        
-        try:
-            # Generate Blockly
-            blockly, metadata = await blockly_generator.generate(
-                architecture=architecture,
-                layouts={"screen_1": layout}
-            )
-            
-            print("\n✅ Blockly generated successfully!")
-            print(f"\nBlockly:")
-            print(f"  Blocks: {len(blockly['blocks']['blocks'])}")
-            print(f"  Variables: {len(blockly['variables'])}")
-            
-            # Show blocks
-            for idx, block in enumerate(blockly['blocks']['blocks'][:5], 1):
-                print(f"    {idx}. {block['type']} (id: {block['id']})")
-            
-            # Show variables
-            for var in blockly['variables']:
-                print(f"  Variable: {var['name']}")
-            
-            # Show custom blocks
-            print(f"  Custom blocks: {len(blockly.get('custom_blocks', []))}")
-            
-            print(f"\nMetadata:")
-            print(f"  Model: {metadata['model']}")
-            print(f"  Tokens: {metadata['tokens_used']}")
-            print(f"  Duration: {metadata['api_duration_ms']}ms")
-            
-            # Statistics
-            stats = blockly_generator.get_statistics()
-            print(f"\nStatistics:")
-            print(f"  Success rate: {stats['success_rate']:.1f}%")
-            print(f"  Blocks generated: {stats['blocks_generated']}")
-            
-        except Exception as e:
-            print(f"\n❌ Test failed: {e}")
-            raise
-        
-        print("\n" + "=" * 60 + "\n")
-    
-    asyncio.run(test())
