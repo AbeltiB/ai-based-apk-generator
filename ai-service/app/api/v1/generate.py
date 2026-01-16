@@ -307,7 +307,7 @@ async def generate_app(
         await cache_manager.set(
             f"task:{task_id}",
             task_data,
-            expire=86400  # 24 hours
+            ttl=86400  # 24 hours
         )
         
         # Create AI request

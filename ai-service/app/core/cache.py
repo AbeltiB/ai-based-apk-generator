@@ -108,6 +108,9 @@ class CacheManager:
         Example:
             >>> await cache.set("my_key", {"data": "value"}, ttl=3600)
         """
+        logger.debug(f"Redis SET key={key}, ttl={ttl}")
+
+
         if not self._connected or not self.client:
             logger.warning("Cache not connected, skipping set")
             return False

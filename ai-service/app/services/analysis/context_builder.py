@@ -1,5 +1,5 @@
 """
-Enhanced Context Builder - Comprehensive context enrichment.
+Enhanced Context Builder - Fixed version with proper error handling
 
 Loads and structures all relevant context for AI generation:
 - Conversation history
@@ -8,17 +8,17 @@ Loads and structures all relevant context for AI generation:
 - Intent analysis results
 """
 from typing import Dict, Any, List, Optional
-from loguru import logger
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timezone
 
 from app.core.database import db_manager
 from app.models.enhanced_schemas import IntentAnalysis, EnrichedContext
+from app.utils.logging import get_logger, log_context
+
+logger = get_logger(__name__)
 
 
 class ContextRelevanceScore:
-    """
-    Calculate confidence that a project is relevant to current request.
-    """
+    """Calculate confidence that a project is relevant to current request."""
     
     @staticmethod
     def calculate(
@@ -27,18 +27,7 @@ class ContextRelevanceScore:
         session_id: str,
         intent: IntentAnalysis
     ) -> float:
-        """
-        Calculate relevance score (0.0 to 1.0).
-        
-        Args:
-            project: Project data
-            user_id: Current user ID
-            session_id: Current session ID
-            intent: Intent analysis
-            
-        Returns:
-            Relevance score (higher = more relevant)
-        """
+        """Calculate relevance score (0.0 to 1.0)."""
         score = 0.0
         
         # CRITICAL: Ownership verification (mandatory)
@@ -53,7 +42,7 @@ class ContextRelevanceScore:
         # Recency (within last hour)
         updated_at = project.get('updated_at')
         if updated_at:
-            import datetime as dt
+            from datetime import datetime, timezone
             age_hours = (datetime.now(timezone.utc) - updated_at).total_seconds() / 3600
             if age_hours < 1:
                 score += 0.3
@@ -65,18 +54,13 @@ class ContextRelevanceScore:
             score += 0.1
         
         return min(score, 1.0)
-    
+
+
 class ContextBuilder:
-    """
-    Builds enriched context for AI generation.
+    """Builds enriched context for AI generation."""
     
-    Aggregates all relevant information:
-    - Recent conversation history
-    - Existing project data (for extend/modify intents)
-    - User preferences and settings
-    - Intent analysis results
-    - Session metadata
-    """
+    # Minimum confidence threshold for using existing projects
+    MIN_CONFIDENCE_THRESHOLD = 0.5
     
     async def build_context(
         self,
@@ -87,91 +71,102 @@ class ContextBuilder:
         original_request: Dict[str, Any],
         project_id: Optional[str] = None
     ) -> EnrichedContext:
-        """
-        Build comprehensive enriched context.
-        Fixes: Now requires explicit project_id or high-confidence match.
+        """Build comprehensive enriched context."""
         
-        Args:
-            user_id: User identifier
-            session_id: Session identifier
-            prompt: User's prompt
-            intent: Intent analysis results
-            original_request: Original AIRequest dict
-            
-        Returns:
-            EnrichedContext with all relevant data
-        """
-        logger.info("🔨 Building enriched context...",
-                    extra={
-                        "user_id": user_id,
-                        "session_id": session_id,
-                        "requires_context": intent.requires_context,
-                        "explicit_project_id": project_id is not None,
-                        "intent_type": intent.intent_type,
-                        "complexity": intent.complexity
-                    })
-        
-        context = EnrichedContext(
-            original_request=original_request,
-            intent_analysis=intent,
-            conversation_history=[],
-            existing_project=None,
-            user_preferences={},
-            timestamp=datetime.now(timezone.utc)
-        )
-        
-        # Load conversation history
-        context.conversation_history = await self._load_conversation_history(
-            user_id=user_id,
-            session_id=session_id,
-            limit=10 #TODO: make configurable
-        )
-        
-        # Load existing project with strict validation
-        if intent.requires_context or project_id:
-            context.existing_project = await self._load_existing_project_safe(
-                user_id=user_id,
-                session_id=session_id,
-                intent=intent,
-                explicit_project_id=project_id
+        with log_context(operation="context_building"):
+            logger.info(
+                "context.building.started",
+                extra={
+                    "user_id": user_id,
+                    "session_id": session_id,
+                    "requires_context": intent.requires_context,
+                    "explicit_project_id": project_id is not None,
+                    "intent_type": intent.intent_type,
+                    "complexity": intent.complexity
+                }
             )
             
-            if context.existing_project:
-                logger.info(
-                    "   ✅ Existing project loaded for context"
-                    "context.project.loaded",
-                    extra={
-                        "project_id": context.existing_project['project_id'],
-                        "confidence": context.existing_project.get('confidence', 0.0)
-                    }
+            context = EnrichedContext(
+                original_request=original_request,
+                intent_analysis=intent,
+                conversation_history=[],
+                existing_project=None,
+                user_preferences={},
+                timestamp=datetime.now(timezone.utc)
+            )
+            
+            # Load conversation history
+            try:
+                context.conversation_history = await self._load_conversation_history(
+                    user_id=user_id,
+                    session_id=session_id,
+                    limit=10
                 )
-            elif intent.requires_context:
+            except Exception as e:
                 logger.warning(
-                    "   ⚠️ Existing project required but not found or confidence too low"
-                    "context.project.missing",
-                    extra={
-                        "user_id": user_id,
-                        "session_id": session_id,
-                        "message": "⚠️ Intent requires context but no valid project found.",
-                        "intent_type": intent.intent_type,
-                        "complexity": intent.complexity
-                    }
+                    "context.history.load_failed",
+                    extra={"error": str(e)},
+                    exc_info=True
                 )
-        
-        # Load user preferences
-        context.user_preferences = await self._load_user_preferences(user_id)
-        
-        logger.info(
-            "✅ Context built successfully"
-            "context.build.completed",
-            extra={
-                "history_messages": len(context.conversation_history),
-                "has_project": context.existing_project is not None,
-                "preferences_loaded": len(context.user_preferences) > 0
-            }
-        )
-        
-        return context
+                context.conversation_history = []
+            
+            # Load existing project with strict validation
+            if intent.requires_context or project_id:
+                try:
+                    context.existing_project = await self._load_existing_project_safe(
+                        user_id=user_id,
+                        session_id=session_id,
+                        intent=intent,
+                        explicit_project_id=project_id
+                    )
+                    
+                    if context.existing_project:
+                        logger.info(
+                            "context.project.loaded",
+                            extra={
+                                "project_id": context.existing_project.get('project_id'),
+                                "confidence": context.existing_project.get('_confidence', 0.0)
+                            }
+                        )
+                    elif intent.requires_context:
+                        logger.warning(
+                            "context.project.missing",
+                            extra={
+                                "user_id": user_id,
+                                "session_id": session_id,
+                                "intent_type": intent.intent_type,
+                                "complexity": intent.complexity
+                            }
+                        )
+                except Exception as e:
+                    logger.error(
+                        "context.project.load_failed",
+                        extra={"error": str(e)},
+                        exc_info=True
+                    )
+                    context.existing_project = None
+            
+            # Load user preferences
+            try:
+                context.user_preferences = await self._load_user_preferences(user_id)
+            except Exception as e:
+                logger.warning(
+                    "context.preferences.load_failed",
+                    extra={"error": str(e)},
+                    exc_info=True
+                )
+                context.user_preferences = self._get_default_preferences()
+            
+            logger.info(
+                "context.building.completed",
+                extra={
+                    "history_messages": len(context.conversation_history),
+                    "has_project": context.existing_project is not None,
+                    "preferences_loaded": len(context.user_preferences) > 0
+                }
+            )
+            
+            return context
     
     async def _load_conversation_history(
         self,
@@ -179,21 +174,59 @@ class ContextBuilder:
         session_id: str,
         limit: int = 10
     ) -> List[Dict[str, Any]]:
-        """
-        Load recent conversation history.
+        """Load recent conversation history."""
         
-        Args:
-            user_id: User identifier
-            session_id: Session identifier
-            limit: Maximum conversations to load
-            
-        Returns:
-            List of conversation messages
-        """
         logger.debug(
-                    "context.history.loading",
-                    extra={"user_id": user_id, "session_id": session_id}
-                )        
+            "context.history.loading",
+            extra={"user_id": user_id, "session_id": session_id}
+        )
+        
+        try:
+            conversations = await db_manager.get_conversation_history(
+                user_id=user_id,
+                session_id=session_id,
+                limit=limit
+            )
+            
+            if conversations:
+                logger.debug(
+                    "context.history.loaded",
+                    extra={"count": len(conversations)}
+                )
+                return conversations
+            else:
+                logger.debug("context.history.empty")
+                return []
+                
+        except Exception as e:
+            logger.error(
+                "context.history.load_error",
+                extra={"error": str(e)},
+                exc_info=True
+            )
+            return []
+    
+    async def _load_existing_project_safe(
+        self,
+        user_id: str,
+        session_id: str,
+        intent: IntentAnalysis,
+        explicit_project_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Load existing project with strict validation.
+        
+        FIXED: This method was missing and causing the NoneType error.
+        """
+        
+        logger.debug(
+            "context.project.loading",
+            extra={
+                "user_id": user_id,
+                "session_id": session_id,
+                "explicit_project_id": explicit_project_id
+            }
+        )
         
         try:
             # Case 1: Explicit project ID provided (highest priority)
@@ -217,9 +250,9 @@ class ContextBuilder:
                             "owned_by": project.get('user_id')
                         }
                     )
-                    return None  # Security violation - wrong user
+                    return None
                 
-                # Add confidence (explicit reference = 1.0)
+                # Add confidence metadata
                 project['_confidence'] = 1.0
                 project['_match_reason'] = 'explicit_project_id'
                 
@@ -230,7 +263,7 @@ class ContextBuilder:
                 
                 return project
             
-            # Case 2: Match by session_id (medium priority)
+            # Case 2: Match by session_id
             projects = await db_manager.get_user_projects(
                 user_id=user_id,
                 limit=5
@@ -240,11 +273,10 @@ class ContextBuilder:
                 logger.debug("context.project.none_found")
                 return None
             
-            # Find projects matching session
+            # Find projects matching session with confidence scoring
             session_matches = []
             
             for project in projects:
-                # Calculate confidence
                 confidence = ContextRelevanceScore.calculate(
                     project=project,
                     user_id=user_id,
@@ -273,7 +305,7 @@ class ContextBuilder:
             logger.info(
                 "context.project.loaded_session",
                 extra={
-                    "project_id": best_match['id'],
+                    "project_id": best_match.get('id'),
                     "confidence": best_match['_confidence'],
                     "candidates_evaluated": len(projects)
                 }
@@ -282,37 +314,44 @@ class ContextBuilder:
             return best_match
             
         except Exception as e:
-            logger.error(f"Failed to load existing project: {e}", exc_info=True)
+            logger.error(
+                "context.project.load_error",
+                extra={"error": str(e)},
+                exc_info=True
+            )
             return None
     
     async def _load_user_preferences(self, user_id: str) -> Dict[str, Any]:
-        """
-        Load user preferences.
+        """Load user preferences."""
         
-        Args:
-            user_id: User identifier
-            
-        Returns:
-            User preferences dict
-        """
-        logger.debug(f"Loading preferences for {user_id}...")
+        logger.debug(
+            "context.preferences.loading",
+            extra={"user_id": user_id}
+        )
         
         try:
             preferences = await db_manager.get_user_preferences(user_id)
             
             if preferences:
-                logger.debug(f"Loaded {len(preferences)} preference settings")
+                logger.debug(
+                    "context.preferences.loaded",
+                    extra={"count": len(preferences)}
+                )
                 return preferences
             else:
-                logger.debug("No preferences found, using defaults")
+                logger.debug("context.preferences.using_defaults")
                 return self._get_default_preferences()
                 
         except Exception as e:
-            logger.warning(f"Failed to load user preferences: {e}")
+            logger.warning(
+                "context.preferences.load_error",
+                extra={"error": str(e)},
+                exc_info=True
+            )
             return self._get_default_preferences()
     
     def _get_default_preferences(self) -> Dict[str, Any]:
-        """Get default user preferences"""
+        """Get default user preferences."""
         return {
             "theme": "light",
             "component_style": "detailed",
@@ -327,15 +366,8 @@ class ContextBuilder:
         }
     
     def format_context_for_prompt(self, context: EnrichedContext) -> str:
-        """
-        Format enriched context into a string for Claude prompts.
+        """Format enriched context into a string for LLM prompts."""
         
-        Args:
-            context: EnrichedContext object
-            
-        Returns:
-            Formatted context string
-        """
         parts = []
         
         # Intent information
@@ -365,7 +397,6 @@ class ContextBuilder:
             confidence = proj.get('_confidence', 0.0)
             match_reason = proj.get('_match_reason', 'unknown')
             
-            
             parts.append(f"**Existing Project:** {proj.get('project_name', 'Unnamed')}")
             parts.append(f"  - Confidence: {confidence:.2f} (matched by {match_reason})")
             
@@ -388,65 +419,3 @@ class ContextBuilder:
 
 # Global context builder instance
 context_builder = ContextBuilder()
-
-
-if __name__ == "__main__":
-    # Test context builder
-    import asyncio
-    from app.models.enhanced_schemas import IntentAnalysis
-    
-    async def test_context_builder():
-        """Test context building"""
-        print("\n" + "=" * 60)
-        print("CONTEXT BUILDER TEST")
-        print("=" * 60)
-        
-        # Connect to database
-        await db_manager.connect()
-        
-        # Create test intent
-        intent = IntentAnalysis(
-            intent_type="new_app",
-            complexity="medium",
-            confidence=0.9,
-            extracted_entities={
-                "components": ["Button", "InputText"],
-                "actions": ["click", "input"],
-                "data": ["todo"],
-                "features": ["add", "list"]
-            },
-            requires_context=False,
-            multi_turn=False
-        )
-        
-        # Build context
-        context = await context_builder.build_context(
-            user_id="test_user_phase2",
-            session_id="test_session_phase2",
-            prompt="Create a todo list app",
-            intent=intent,
-            original_request={"prompt": "Create a todo list app"}
-        )
-        
-        print(f"\n✅ Context built:")
-        print(f"   Intent: {context.intent_analysis.intent_type}")
-        print(f"   Complexity: {context.intent_analysis.complexity}")
-        print(f"   History: {len(context.conversation_history)} messages")
-        print(f"   Existing project: {context.existing_project is not None}")
-        print(f"   Preferences: {len(context.user_preferences)} settings")
-        
-        # Format for prompt
-        print("\n📝 Formatted context for prompt:")
-        print("-" * 60)
-        formatted = context_builder.format_context_for_prompt(context)
-        print(formatted)
-        print("-" * 60)
-        
-        # Disconnect
-        await db_manager.disconnect()
-        
-        print("\n" + "=" * 60)
-        print("✅ Context builder test complete!")
-        print("=" * 60 + "\n")
-    
-    asyncio.run(test_context_builder())
