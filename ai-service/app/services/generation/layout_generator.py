@@ -27,6 +27,10 @@ class LayoutGenerationError(Exception):
     """Base exception for layout generation errors"""
     pass
 
+class CollisionError(Exception):
+    """Raised when UI elements collide during layout generation."""
+    pass
+
 
 class LayoutGenerator:
     """
