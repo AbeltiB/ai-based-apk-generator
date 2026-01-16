@@ -16,7 +16,7 @@ import json
 import logging
 import traceback
 from typing import Any, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from contextvars import ContextVar
 from functools import wraps
 import socket
@@ -57,7 +57,7 @@ class StructuredLogger:
     def _get_base_context(self) -> Dict[str, Any]:
         """Get base logging context"""
         return {
-            "@timestamp": datetime.utcnow().isoformat() + "Z",
+            "@timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "service": {
                 "name": self.service_name,
                 "version": self.service_version,
@@ -248,7 +248,7 @@ def trace_async(event_prefix: str):
         async def wrapper(*args, **kwargs):
             logger = get_logger(func.__module__)
             
-            start_time = datetime.utcnow()
+            start_time = datetime.now(timezone.utc)
             
             logger.info(
                 f"{event_prefix}.started",
@@ -262,7 +262,7 @@ def trace_async(event_prefix: str):
             try:
                 result = await func(*args, **kwargs)
                 
-                duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+                duration_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
                 
                 logger.performance(
                     f"{event_prefix}.completed",
@@ -276,7 +276,7 @@ def trace_async(event_prefix: str):
                 return result
                 
             except Exception as e:
-                duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+                duration_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
                 
                 logger.error(
                     f"{event_prefix}.failed",
@@ -307,7 +307,7 @@ def trace_sync(event_prefix: str):
         def wrapper(*args, **kwargs):
             logger = get_logger(func.__module__)
             
-            start_time = datetime.utcnow()
+            start_time = datetime.now(timezone.utc)
             
             logger.info(
                 f"{event_prefix}.started",
@@ -321,7 +321,7 @@ def trace_sync(event_prefix: str):
             try:
                 result = func(*args, **kwargs)
                 
-                duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+                duration_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
                 
                 logger.performance(
                     f"{event_prefix}.completed",
@@ -335,7 +335,7 @@ def trace_sync(event_prefix: str):
                 return result
                 
             except Exception as e:
-                duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+                duration_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
                 
                 logger.error(
                     f"{event_prefix}.failed",

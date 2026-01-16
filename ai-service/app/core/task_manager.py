@@ -3,7 +3,7 @@ Task manager for tracking generation tasks.
 """
 import asyncio
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 from app.core.cache import cache_manager
@@ -35,12 +35,12 @@ class TaskManager:
             "status": "queued",
             "progress": 0,
             "message": "Task created",
-            "created_at": datetime.utcnow().isoformat() + "Z",
-            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "created_at": datetime.now(timezone.utc).isoformat() + "Z",
+            "updated_at": datetime.now(timezone.utc).isoformat() + "Z",
             "result": None,
             "error": None,
             "metrics": {
-                "start_time": datetime.utcnow().isoformat() + "Z",
+                "start_time": datetime.now(timezone.utc).isoformat() + "Z",
                 "end_time": None,
                 "total_time_ms": None
             }
@@ -93,7 +93,7 @@ class TaskManager:
             if metrics:
                 task_data["metrics"].update(metrics)
             
-            task_data["updated_at"] = datetime.utcnow().isoformat() + "Z"
+            task_data["updated_at"] = datetime.now(timezone.utc).isoformat() + "Z"
             
             # Update Redis
             success = await cache_manager.set(
@@ -168,7 +168,7 @@ class TaskManager:
     async def cleanup_old_tasks(self, days: int = 7) -> int:
         """Clean up tasks older than specified days"""
         count = 0
-        cutoff = datetime.utcnow().timestamp() - (days * 86400)
+        cutoff = datetime.now(timezone.utc).timestamp() - (days * 86400)
         
         cursor = 0
         pattern = f"task:*"

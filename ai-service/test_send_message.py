@@ -6,7 +6,7 @@ This simulates the API Gateway sending prompts to our AI service.
 import pika
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 def send_test_message(prompt: str):
     """
@@ -42,7 +42,7 @@ def send_test_message(prompt: str):
         "socket_id": "test_socket_xyz",
         "prompt": prompt,
         "context": None,
-        "timestamp": datetime.utcnow().isoformat() + "Z"
+        "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
     }
     
     # Publish message

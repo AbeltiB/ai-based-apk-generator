@@ -10,7 +10,7 @@ import asyncio
 import time
 from typing import Dict, Any, Optional
 from loguru import logger
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.models.schemas import AIRequest, ProgressUpdate, ErrorResponse
 from app.core.messaging import queue_manager
@@ -40,7 +40,7 @@ class PipelineStage:
         context['errors'].append({
             'stage': self.name,
             'error': str(error),
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         })
         return context
 
@@ -696,7 +696,7 @@ class PublishingStage(PipelineStage):
                 "blockly": context.get('blockly', {})
             },
             "metadata": {
-                "generated_at": datetime.utcnow().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
                 "processing_time_ms": context.get('total_time_ms', 0),
                 "ai_model": settings.anthropic_model,
                 "stages_completed": list(context['stage_times'].keys()),

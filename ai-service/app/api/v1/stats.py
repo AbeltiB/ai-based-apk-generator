@@ -4,7 +4,7 @@ Statistics and monitoring endpoints.
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 import asyncio
 
 from app.core.cache import cache_manager
@@ -72,11 +72,11 @@ class StatsResponse(BaseModel):
 class TimeRangeRequest(BaseModel):
     """Time range for statistics"""
     start_time: str = Field(
-        default_factory=lambda: (datetime.utcnow() - timedelta(hours=24)).isoformat() + "Z",
+        default_factory=lambda: (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat() + "Z",
         description="Start time in ISO format"
     )
     end_time: str = Field(
-        default_factory=lambda: datetime.utcnow().isoformat() + "Z",
+        default_factory=lambda: datetime.now(timezone.utc).isoformat() + "Z",
         description="End time in ISO format"
     )
     interval_minutes: int = Field(default=60, ge=1, le=1440)
@@ -127,7 +127,7 @@ async def get_system_stats() -> StatsResponse:
     with log_context(endpoint="/api/v1/stats"):
         logger.info("api.stats.requested")
         
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         
         # Gather all statistics in parallel
         requests_stats, queue_stats, cache_stats, tasks_stats, system_stats = await asyncio.gather(
@@ -163,11 +163,11 @@ async def get_system_stats() -> StatsResponse:
         # Get uptime
         uptime_start = await cache_manager.get("app:start_time")
         if uptime_start:
-            uptime_seconds = (datetime.utcnow() - datetime.fromisoformat(uptime_start)).total_seconds()
+            uptime_seconds = (datetime.now(timezone.utc) - datetime.fromisoformat(uptime_start)).total_seconds()
         else:
             uptime_seconds = 0
         
-        duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+        duration_ms = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
         
         logger.info(
             "api.stats.completed",
@@ -178,7 +178,7 @@ async def get_system_stats() -> StatsResponse:
         )
         
         return StatsResponse(
-            timestamp=datetime.utcnow().isoformat() + "Z",
+            timestamp=datetime.now(timezone.utc).isoformat() + "Z",
             uptime_seconds=uptime_seconds,
             requests=requests_stats,
             queue=queue_stats,
@@ -203,7 +203,7 @@ async def get_request_stats() -> Dict[str, Any]:
         stats = await _get_request_stats()
         
         return {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "statistics": stats
         }
 
@@ -223,7 +223,7 @@ async def get_task_stats() -> Dict[str, Any]:
         stats = await _get_task_stats()
         
         return {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
             "statistics": stats
         }
 

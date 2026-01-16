@@ -6,7 +6,7 @@ POST /api/v1/generate - Submit prompt and receive task ID
 from fastapi import APIRouter, HTTPException, status, BackgroundTasks, Request, Depends
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 from enum import Enum
 
@@ -298,8 +298,8 @@ async def generate_app(
             "message": "Request queued",
             "prompt": request.prompt,
             "priority": request.priority,
-            "created_at": datetime.utcnow().isoformat() + "Z",
-            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "created_at": datetime.now(timezone.utc).isoformat() + "Z",
+            "updated_at": datetime.now(timezone.utc).isoformat() + "Z",
             "correlation_id": correlation_id
         }
         
@@ -320,7 +320,7 @@ async def generate_app(
                 prompt=request.prompt,
                 context=PromptContext(**request.context) if request.context else None,
                 priority=request.priority,
-                timestamp=datetime.utcnow()
+                timestamp=datetime.now(timezone.utc)
             )
             
             logger.info(
@@ -371,7 +371,7 @@ async def generate_app(
                         # Update task status
                         task_data["status"] = TaskStatus.PROCESSING
                         task_data["message"] = "Request picked up by processor"
-                        task_data["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                        task_data["updated_at"] = datetime.now(timezone.utc).isoformat() + "Z"
                         await cache_manager.set(f"task:{task_id}", task_data, expire=86400)
                     else:
                         logger.error(
@@ -385,7 +385,7 @@ async def generate_app(
                         # Update task status to failed
                         task_data["status"] = TaskStatus.FAILED
                         task_data["message"] = "Failed to publish to queue"
-                        task_data["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                        task_data["updated_at"] = datetime.now(timezone.utc).isoformat() + "Z"
                         await cache_manager.set(f"task:{task_id}", task_data, expire=86400)
                         
             except Exception as e:
@@ -409,7 +409,7 @@ async def generate_app(
             session_id=session_id,
             status="queued",
             message="Request queued for processing. Connect to WebSocket for updates.",
-            created_at=datetime.utcnow().isoformat() + "Z",
+            created_at=datetime.now(timezone.utc).isoformat() + "Z",
             estimated_completion_seconds=45,
             websocket_url=f"ws://{http_request.base_url.hostname}:{http_request.base_url.port}/ws/{task_id}"
         )
@@ -495,7 +495,7 @@ async def cancel_task(task_id: str) -> CancelTaskResponse:
         # Update task status to cancelled
         task_data["status"] = TaskStatus.CANCELLED
         task_data["message"] = "Task cancelled by user"
-        task_data["updated_at"] = datetime.utcnow().isoformat() + "Z"
+        task_data["updated_at"] = datetime.now(timezone.utc).isoformat() + "Z"
         
         # Store updated task
         await cache_manager.set(f"task:{task_id}", task_data, expire=86400)
@@ -505,7 +505,7 @@ async def cancel_task(task_id: str) -> CancelTaskResponse:
             await queue_manager.publish_response({
                 "type": "task_cancelled",
                 "task_id": task_id,
-                "timestamp": datetime.utcnow().isoformat() + "Z"
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
             })
         except Exception as e:
             logger.warning(
@@ -529,7 +529,7 @@ async def cancel_task(task_id: str) -> CancelTaskResponse:
             task_id=task_id,
             status="cancelled",
             message="Task successfully cancelled",
-            cancelled_at=datetime.utcnow().isoformat() + "Z"
+            cancelled_at=datetime.now(timezone.utc).isoformat() + "Z"
         )
 
 
@@ -555,7 +555,7 @@ async def get_system_stats() -> SystemStatsResponse:
         logger.info("api.stats.requested")
         
         # Get current timestamp
-        timestamp = datetime.utcnow().isoformat() + "Z"
+        timestamp = datetime.now(timezone.utc).isoformat() + "Z"
         
         # Get request statistics from Redis
         try:
@@ -656,7 +656,7 @@ async def get_system_stats() -> SystemStatsResponse:
         # For now, we'll track it in Redis on app startup
         uptime_start = await cache_manager.get("app:start_time")
         if uptime_start:
-            uptime_seconds = (datetime.utcnow() - datetime.fromisoformat(uptime_start)).total_seconds()
+            uptime_seconds = (datetime.now(timezone.utc) - datetime.fromisoformat(uptime_start)).total_seconds()
         else:
             uptime_seconds = 0
         

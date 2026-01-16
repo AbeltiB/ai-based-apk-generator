@@ -9,7 +9,7 @@ Three health check endpoints:
 from fastapi import APIRouter, status, Response
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 import asyncio
 
@@ -143,7 +143,7 @@ async def liveness_check() -> LivenessResponse:
     
     return LivenessResponse(
         status="alive",
-        timestamp=datetime.utcnow().isoformat() + "Z"
+        timestamp=datetime.now(timezone.utc).isoformat() + "Z"
     )
 
 
@@ -161,7 +161,7 @@ async def check_redis() -> DependencyStatus:
                 name="Redis Cache",
                 status="unhealthy",
                 message="Not connected",
-                last_checked=datetime.utcnow().isoformat() + "Z"
+                last_checked=datetime.now(timezone.utc).isoformat() + "Z"
             )
         
         # Quick ping
@@ -177,7 +177,7 @@ async def check_redis() -> DependencyStatus:
             status="healthy",
             response_time_ms=response_time,
             message="Connected",
-            last_checked=datetime.utcnow().isoformat() + "Z"
+            last_checked=datetime.now(timezone.utc).isoformat() + "Z"
         )
         
     except asyncio.TimeoutError:
@@ -185,14 +185,14 @@ async def check_redis() -> DependencyStatus:
             name="Redis Cache",
             status="unhealthy",
             message="Ping timeout (>1s)",
-            last_checked=datetime.utcnow().isoformat() + "Z"
+            last_checked=datetime.now(timezone.utc).isoformat() + "Z"
         )
     except Exception as e:
         return DependencyStatus(
             name="Redis Cache",
             status="unhealthy",
             message=str(e),
-            last_checked=datetime.utcnow().isoformat() + "Z"
+            last_checked=datetime.now(timezone.utc).isoformat() + "Z"
         )
 
 
@@ -206,7 +206,7 @@ async def check_rabbitmq() -> DependencyStatus:
                 name="RabbitMQ",
                 status="unhealthy",
                 message="Not connected",
-                last_checked=datetime.utcnow().isoformat() + "Z"
+                last_checked=datetime.now(timezone.utc).isoformat() + "Z"
             )
         
         response_time = (time.time() - start) * 1000
@@ -216,7 +216,7 @@ async def check_rabbitmq() -> DependencyStatus:
             status="healthy",
             response_time_ms=response_time,
             message="Connected",
-            last_checked=datetime.utcnow().isoformat() + "Z"
+            last_checked=datetime.now(timezone.utc).isoformat() + "Z"
         )
         
     except Exception as e:
@@ -224,7 +224,7 @@ async def check_rabbitmq() -> DependencyStatus:
             name="RabbitMQ",
             status="unhealthy",
             message=str(e),
-            last_checked=datetime.utcnow().isoformat() + "Z"
+            last_checked=datetime.now(timezone.utc).isoformat() + "Z"
         )
 
 
@@ -238,7 +238,7 @@ async def check_database() -> DependencyStatus:
                 name="PostgreSQL",
                 status="unhealthy",
                 message="Not connected",
-                last_checked=datetime.utcnow().isoformat() + "Z"
+                last_checked=datetime.now(timezone.utc).isoformat() + "Z"
             )
         
         # Quick query
@@ -254,7 +254,7 @@ async def check_database() -> DependencyStatus:
             status="healthy",
             response_time_ms=response_time,
             message="Connected",
-            last_checked=datetime.utcnow().isoformat() + "Z"
+            last_checked=datetime.now(timezone.utc).isoformat() + "Z"
         )
         
     except asyncio.TimeoutError:
@@ -262,14 +262,14 @@ async def check_database() -> DependencyStatus:
             name="PostgreSQL",
             status="unhealthy",
             message="Query timeout (>2s)",
-            last_checked=datetime.utcnow().isoformat() + "Z"
+            last_checked=datetime.now(timezone.utc).isoformat() + "Z"
         )
     except Exception as e:
         return DependencyStatus(
             name="PostgreSQL",
             status="unhealthy",
             message=str(e),
-            last_checked=datetime.utcnow().isoformat() + "Z"
+            last_checked=datetime.now(timezone.utc).isoformat() + "Z"
         )
 
 
@@ -313,7 +313,7 @@ async def readiness_check(response: Response) -> ReadinessResponse:
                 name="Redis Cache",
                 status="unhealthy",
                 message=str(redis_status),
-                last_checked=datetime.utcnow().isoformat() + "Z"
+                last_checked=datetime.now(timezone.utc).isoformat() + "Z"
             )
         
         if isinstance(rabbitmq_status, Exception):
@@ -321,7 +321,7 @@ async def readiness_check(response: Response) -> ReadinessResponse:
                 name="RabbitMQ",
                 status="unhealthy",
                 message=str(rabbitmq_status),
-                last_checked=datetime.utcnow().isoformat() + "Z"
+                last_checked=datetime.now(timezone.utc).isoformat() + "Z"
             )
         
         if isinstance(db_status, Exception):
@@ -329,7 +329,7 @@ async def readiness_check(response: Response) -> ReadinessResponse:
                 name="PostgreSQL",
                 status="unhealthy",
                 message=str(db_status),
-                last_checked=datetime.utcnow().isoformat() + "Z"
+                last_checked=datetime.now(timezone.utc).isoformat() + "Z"
             )
         
         dependencies = {
@@ -379,7 +379,7 @@ async def readiness_check(response: Response) -> ReadinessResponse:
             status=result_status,
             ready=all_healthy,
             dependencies=dependencies,
-            timestamp=datetime.utcnow().isoformat() + "Z"
+            timestamp=datetime.now(timezone.utc).isoformat() + "Z"
         )
 
 
@@ -453,7 +453,7 @@ async def full_health_check() -> FullHealthResponse:
                 name="Redis Cache",
                 status="unhealthy",
                 message=str(redis_status),
-                last_checked=datetime.utcnow().isoformat() + "Z"
+                last_checked=datetime.now(timezone.utc).isoformat() + "Z"
             )
         
         if isinstance(rabbitmq_status, Exception):
@@ -461,7 +461,7 @@ async def full_health_check() -> FullHealthResponse:
                 name="RabbitMQ",
                 status="unhealthy",
                 message=str(rabbitmq_status),
-                last_checked=datetime.utcnow().isoformat() + "Z"
+                last_checked=datetime.now(timezone.utc).isoformat() + "Z"
             )
         
         if isinstance(db_status, Exception):
@@ -469,7 +469,7 @@ async def full_health_check() -> FullHealthResponse:
                 name="PostgreSQL",
                 status="unhealthy",
                 message=str(db_status),
-                last_checked=datetime.utcnow().isoformat() + "Z"
+                last_checked=datetime.now(timezone.utc).isoformat() + "Z"
             )
         
         if isinstance(metrics, Exception):
@@ -528,5 +528,5 @@ async def full_health_check() -> FullHealthResponse:
             uptime_seconds=uptime_seconds,
             dependencies=dependencies,
             metrics=metrics,
-            timestamp=datetime.utcnow().isoformat() + "Z"
+            timestamp=datetime.now(timezone.utc).isoformat() + "Z"
         )

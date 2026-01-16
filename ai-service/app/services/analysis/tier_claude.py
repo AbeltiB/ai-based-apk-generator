@@ -165,7 +165,7 @@ Analyze user requests and classify them with high accuracy.
         request: ClassificationRequest
     ) -> IntentAnalysisResult:
         """Build IntentAnalysisResult from parsed data"""
-        from datetime import datetime
+        from datetime import datetime, timezone
         
         # Parse confidence
         confidence_data = data.get("confidence", {})
@@ -232,7 +232,7 @@ Analyze user requests and classify them with high accuracy.
             tier_attempts=[],
             total_latency_ms=0,
             total_cost_usd=0.0,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
     
     def _determine_action(

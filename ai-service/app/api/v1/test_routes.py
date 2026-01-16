@@ -6,7 +6,7 @@ Add this file: ai-service/app/api/v1/test_routes.py
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
 from app.config import settings
@@ -71,7 +71,7 @@ async def test_prompt(
     ai_request = AIRequest(
         user_id=request.user_id,
         session_id=request.session_id,
-        socket_id=f"test_socket_{int(datetime.utcnow().timestamp())}",
+        socket_id=f"test_socket_{int(datetime.now(timezone.utc).timestamp())}",
         prompt=request.prompt,
         context=request.context
     )
@@ -120,7 +120,7 @@ async def test_stage(stage: str, request: StageTestRequest):
     result = {
         "stage": stage,
         "prompt": request.prompt,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "output": None,
         "metadata": None,
         "logs": []
@@ -255,7 +255,7 @@ async def get_test_stats():
         "architecture_generator": arch_stats,
         "layout_generator": layout_stats,
         "blockly_generator": blockly_stats,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 
@@ -273,7 +273,7 @@ async def test_complete_flow(request: TestPromptRequest):
         "prompt": request.prompt,
         "stages": {},
         "total_time_ms": 0,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
     
     import time

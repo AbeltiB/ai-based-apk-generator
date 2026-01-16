@@ -4,7 +4,7 @@ Comprehensive test of the complete AI service flow.
 import pika
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def test_multiple_requests():
@@ -46,7 +46,7 @@ def test_multiple_requests():
             "socket_id": f"test_socket_{i}",
             "prompt": prompt,
             "context": None,
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
         }
         
         channel.basic_publish(

@@ -5,7 +5,7 @@ Uses LLM Orchestrator (Llama3 → Heuristic fallback)
 import json
 import asyncio
 from typing import Dict, Any, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.config import settings
 from app.models.schemas import ArchitectureDesign
@@ -261,7 +261,7 @@ class ArchitectureGenerator:
             metadata.update({
                 'used_heuristic': used_heuristic,
                 'validation_warnings': len(warnings),
-                'generated_at': datetime.utcnow().isoformat() + "Z"
+                'generated_at': datetime.now(timezone.utc).isoformat() + "Z"
             })
             
             self.stats['successful'] += 1

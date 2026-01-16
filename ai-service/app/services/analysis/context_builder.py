@@ -9,7 +9,7 @@ Loads and structures all relevant context for AI generation:
 """
 from typing import Dict, Any, List, Optional
 from loguru import logger
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timezone
 
 from app.core.database import db_manager
 from app.models.enhanced_schemas import IntentAnalysis, EnrichedContext
@@ -54,7 +54,7 @@ class ContextRelevanceScore:
         updated_at = project.get('updated_at')
         if updated_at:
             import datetime as dt
-            age_hours = (datetime.utcnow() - updated_at).total_seconds() / 3600
+            age_hours = (datetime.now(timezone.utc) - updated_at).total_seconds() / 3600
             if age_hours < 1:
                 score += 0.3
             elif age_hours < 24:

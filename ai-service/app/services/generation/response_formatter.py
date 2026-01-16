@@ -4,7 +4,7 @@ Response Formatter - Standardized response formatting for all generators
 Ensures consistent response structure across architecture, layout, and blockly generators.
 """
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.utils.logging import get_logger
 
@@ -44,7 +44,7 @@ class ResponseFormatter:
             'metadata': {
                 'generator_type': generator_type,
                 'generation_time_ms': generation_time_ms,
-                'generated_at': datetime.utcnow().isoformat() + "Z",
+                'generated_at': datetime.now(timezone.utc).isoformat() + "Z",
                 **metadata
             }
         }
@@ -135,7 +135,7 @@ class ResponseFormatter:
             'metadata': {
                 'generator_type': generator_type,
                 'warning_count': len(warnings),
-                'generated_at': datetime.utcnow().isoformat() + "Z",
+                'generated_at': datetime.now(timezone.utc).isoformat() + "Z",
                 **metadata
             }
         }
@@ -232,7 +232,7 @@ class ResponseFormatter:
             'warnings': all_warnings,
             'metadata': {
                 'total_generation_time_ms': total_time,
-                'generated_at': datetime.utcnow().isoformat() + "Z",
+                'generated_at': datetime.now(timezone.utc).isoformat() + "Z",
                 'generators': {
                     'architecture': ResponseFormatter.extract_metadata_summary(
                         architecture_response.get('metadata', {})

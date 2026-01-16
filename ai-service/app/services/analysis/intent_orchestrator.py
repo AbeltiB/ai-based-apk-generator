@@ -209,11 +209,11 @@ class IntentClassificationOrchestrator:
         
         cache_key = self._generate_cache_key(request)
         
-        from datetime import datetime
+        from datetime import datetime, timezone
         self.cache[cache_key] = ClassificationCache(
             prompt_hash=cache_key,
             result=result,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             hits=0
         )
     
@@ -269,7 +269,7 @@ class IntentClassificationOrchestrator:
         
         Never crashes - always returns a valid result.
         """
-        from datetime import datetime
+        from datetime import datetime, timezone
         from intent_schemas import (
             IntentType, ComplexityLevel, ExtractedEntities,
             ConfidenceBreakdown, SafetyStatus, ActionRecommendation
@@ -299,7 +299,7 @@ class IntentClassificationOrchestrator:
             tier_attempts=[],
             total_latency_ms=0,
             total_cost_usd=0.0,
-            timestamp=datetime.utcnow()
+            timestamp=datetime.now(timezone.utc)
         )
     
     def get_stats(self) -> Dict[str, Any]:

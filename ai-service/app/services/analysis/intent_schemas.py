@@ -6,7 +6,7 @@ Production-grade data models with validation and metadata.
 from __future__ import annotations
 from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, Field, field_validator
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from app.services.analysis.intent_config import ClassificationTier
 class IntentType(str, Enum):
@@ -259,5 +259,5 @@ class ClassificationCache(BaseModel):
     
     def is_expired(self, ttl_seconds: int = 3600) -> bool:
         """Check if cache entry is expired"""
-        age = (datetime.utcnow() - self.created_at).total_seconds()
+        age = (datetime.now(timezone.utc) - self.created_at).total_seconds()
         return age > ttl_seconds
