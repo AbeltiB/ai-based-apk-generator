@@ -471,3 +471,12 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("✅ All models validated successfully!")
     print("=" * 60 + "\n")
+    
+# Helper function for timestamp strings
+def get_timestamp_str() -> str:
+    """Get current timestamp as ISO string with Z suffix."""
+    dt = datetime.now(timezone.utc)
+    iso_str = dt.isoformat(timespec='milliseconds')
+    if iso_str.endswith('+00:00'):
+        return iso_str[:-6] + 'Z'
+    return iso_str

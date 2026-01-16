@@ -1,0 +1,52 @@
+{
+  "timestamp": "2026-01-15T23:30:43.405268",
+  "total_tests": 3,
+  "passed_tests": 0,
+  "test_results": {
+    "Simple Counter App": {
+      "passed": false,
+      "duration": 6.32754921913147,
+      "latency_ms": 6327.54921913147,
+      "messages_received": 4,
+      "errors_encountered": 2,
+      "progress_stages": [
+        "analyzing",
+        "initializing"
+      ],
+      "error": null,
+      "has_architecture": false,
+      "has_layout": false,
+      "has_blockly": false
+    },
+    "Todo List App": {
+      "passed": false,
+      "duration": 4.1329569816589355,
+      "latency_ms": 4132.956981658936,
+      "messages_received": 4,
+      "errors_encountered": 2,
+      "progress_stages": [
+        "analyzing",
+        "initializing"
+      ],
+      "error": null,
+      "has_architecture": false,
+      "has_layout": false,
+      "has_blockly": false
+    },
+    "Basic Calculator": {
+      "passed": false,
+      "duration": 6.154402494430542,
+      "latency_ms": 6154.402494430542,
+      "messages_received": 4,
+      "errors_encountered": 2,
+      "progress_stages": [
+        "analyzing",
+        "initializing"
+      ],
+      "error": null,
+      "has_architecture": false,
+      "has_layout": false,
+      "has_blockly": false
+    }
+  }
+}
