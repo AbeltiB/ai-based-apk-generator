@@ -372,7 +372,7 @@ async def generate_app(
                         task_data["status"] = TaskStatus.PROCESSING
                         task_data["message"] = "Request picked up by processor"
                         task_data["updated_at"] = datetime.now(timezone.utc).isoformat() + "Z"
-                        await cache_manager.set(f"task:{task_id}", task_data, expire=86400)
+                        await cache_manager.set(f"task:{task_id}", task_data, ttl=86400)
                     else:
                         logger.error(
                             "api.queue.publish_failed",
@@ -386,7 +386,7 @@ async def generate_app(
                         task_data["status"] = TaskStatus.FAILED
                         task_data["message"] = "Failed to publish to queue"
                         task_data["updated_at"] = datetime.now(timezone.utc).isoformat() + "Z"
-                        await cache_manager.set(f"task:{task_id}", task_data, expire=86400)
+                        await cache_manager.set(f"task:{task_id}", task_data, ttl=86400)
                         
             except Exception as e:
                 logger.error(
@@ -498,7 +498,7 @@ async def cancel_task(task_id: str) -> CancelTaskResponse:
         task_data["updated_at"] = datetime.now(timezone.utc).isoformat() + "Z"
         
         # Store updated task
-        await cache_manager.set(f"task:{task_id}", task_data, expire=86400)
+        await cache_manager.set(f"task:{task_id}", task_data, ttl=86400)
         
         # Publish cancellation event to RabbitMQ
         try:
