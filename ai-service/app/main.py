@@ -22,6 +22,7 @@ from app.core.database import db_manager
 from app.models.schemas import AIRequest
 from app.services.pipeline import default_pipeline
 from app.api.v1 import stats
+from app.api.v1 import results
 
 # Import new structured logging
 from app.utils.logging import get_logger, log_context
@@ -238,6 +239,13 @@ app.include_router(
     generate.router,
     prefix="/api/v1",
     tags=["Generation"]
+)
+
+# Results endpoint
+app.include_router(
+    results.router,
+    prefix="/api/v1",
+    tags=["Results"]
 )
 
 # Statistics endpoints
